@@ -1,0 +1,45 @@
+name: shareby
+description: Save links from any app into collections and share boards with friends. Offline-first.
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.6.0          # Flutter 3.27+
+
+dependencies:
+  flutter:
+    sdk: flutter
+  provider: ^6.1.2           # app state (ChangeNotifier)
+  sqflite: ^2.4.1            # on-device database: the offline source of truth
+  path: ^1.9.0
+  shared_preferences: ^2.3.3 # small flags: session, sync cursor, first-run seed
+  http: ^1.2.2               # REST calls to the Shareby API (-> PostgreSQL)
+  uuid: ^4.5.1               # IDs are created on the device so saves work offline
+  url_launcher: ^6.3.1       # open a saved link
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  fonts:
+    - family: Fredoka
+      fonts:
+        - asset: assets/fonts/Fredoka-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Fredoka-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Fredoka-Bold.ttf
+          weight: 700
+    - family: PlusJakartaSans
+      fonts:
+        - asset: assets/fonts/PlusJakartaSans-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/PlusJakartaSans-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/PlusJakartaSans-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/PlusJakartaSans-Bold.ttf
+          weight: 700
