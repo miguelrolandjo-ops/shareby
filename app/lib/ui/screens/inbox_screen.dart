@@ -55,7 +55,6 @@ class InboxScreen extends StatelessWidget {
                   onLongPress: () => showItemActions(context, item),
                 ),
             const SizedBox(height: 12),
-            const InfoNote(text: 'Auto-sorting only uses your personal folders. Shared boards are never auto-filled.'),
           ],
         ),
       ),

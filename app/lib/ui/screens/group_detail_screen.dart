@@ -9,6 +9,7 @@ import '../sheets/add_folder_sheet.dart';
 import '../sheets/add_link_sheet.dart';
 import '../sheets/confirm_item_sheet.dart';
 import '../sheets/invite_sheet.dart';
+import '../sheets/move_items_sheet.dart';
 import '../sheets/item_actions_sheet.dart';
 import '../widgets/common.dart';
 import '../widgets/item_tiles.dart';
@@ -20,8 +21,8 @@ class GroupDetailScreen extends StatefulWidget {
 
   final String folderId;
 
-  static Future<void> open(BuildContext context, String folderId) => Navigator.of(context)
-      .push(MaterialPageRoute<void>(builder: (_) => GroupDetailScreen(folderId: folderId)));
+  static Future<void> open(BuildContext context, String folderId) =>
+      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => GroupDetailScreen(folderId: folderId)));
 
   @override
   State<GroupDetailScreen> createState() => _GroupDetailScreenState();
@@ -31,6 +32,110 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
   bool _grid = false;
   bool _doneCollapsed = false;
   String? _filter; // a tag (personal) or a member name (shared)
+
+  bool _retrying = false;
+
+  Future<void> _retrySort() async {
+    final state = context.read<AppState>();
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _retrying = true);
+    try {
+      final r = await state.retryUncategorized();
+      final found = r.matched == 0
+          ? 'No folder fits these yet'
+          : 'Found a folder for ${r.matched} ${r.matched == 1 ? 'link' : 'links'}. Confirm them on Home';
+      final rest = r.matched > 0 && r.unmatched > 0 ? ' · ${r.unmatched} still unmatched' : '';
+      messenger.showSnackBar(SnackBar(content: Text('$found$rest')));
+    } catch (e) {
+      if (mounted) toast(context, friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _retrying = false);
+    }
+  }
+
+  /// Uncategorized only: re-check every link against the folders that exist now.
+  Widget _retryBanner() => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.line),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Try sorting these again', style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            const Text(
+              'Shareby checks each link against your folders once more. '
+              'Links that still match nothing stay here quietly.',
+              style: TextStyle(color: AppColors.inkSoft, fontSize: 13, height: 1.35),
+            ),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: _retrying ? null : _retrySort,
+              style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
+              icon: _retrying
+                  ? const SizedBox(
+                      width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.auto_awesome_rounded, size: 18),
+              label: Text(_retrying ? 'Checking...' : 'Recategorize'),
+            ),
+          ]),
+        ),
+      );
+
+  // Mass edit (personal folders only): pick links, drag to reorder, move or delete.
+  bool _editing = false;
+  final Set<String> _picked = {};
+  List<String> _editOrder = [];
+
+  void _startEditing(List<Item> all) => setState(() {
+        _editing = true;
+        _picked.clear();
+        _editOrder = [for (final i in all) i.id];
+      });
+
+  void _stopEditing() => setState(() {
+        _editing = false;
+        _picked.clear();
+      });
+
+  void _reorder(int oldIndex, int newIndex) {
+    setState(() => _editOrder.insert(newIndex, _editOrder.removeAt(oldIndex)));
+    context.read<AppState>().setItemOrder(_editOrder);
+  }
+
+  Future<void> _moveSelected(Folder folder, List<Item> picked) async {
+    final state = context.read<AppState>();
+    final messenger = ScaffoldMessenger.of(context);
+    final target = await showMoveItemsSheet(context, count: picked.length, currentFolderId: folder.id);
+    if (target == null || !mounted) return;
+    await state.moveItems(picked, target);
+    final name = state.folderById(target)?.name ?? 'Uncategorized';
+    messenger.showSnackBar(SnackBar(content: Text('Moved ${picked.length} to $name')));
+    _stopEditing();
+  }
+
+  Future<void> _deleteSelected(List<Item> picked) async {
+    final state = context.read<AppState>();
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete ${picked.length == 1 ? '1 link' : '${picked.length} links'}?'),
+        content: const Text('They are removed from this folder for good.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await state.deleteItems(picked);
+    messenger.showSnackBar(SnackBar(content: Text('Deleted ${picked.length}')));
+    _stopEditing();
+  }
 
   void _onItemTap(Item item) {
     if (item.isNew) {
@@ -59,101 +164,157 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
         : (all.map((i) => i.tag).whereType<String>().toSet().toList()..sort());
     // A filter can vanish (tag removed, member left); fall back to All.
     final active = (_filter != null && filters.contains(_filter)) ? _filter : null;
-    final visible = active == null
-        ? all
-        : all.where((i) => folder.isShared ? i.addedByName == active : i.tag == active).toList();
+    final visible =
+        active == null ? all : all.where((i) => folder.isShared ? i.addedByName == active : i.tag == active).toList();
     // To-do first; done links sink into their own section, most recently done first.
     final todo = visible.where((i) => !i.isDone).toList();
-    final done = visible.where((i) => i.isDone).toList()
-      ..sort((a, b) => b.completedAt!.compareTo(a.completedAt!));
+    final done = visible.where((i) => i.isDone).toList()..sort((a, b) => b.completedAt!.compareTo(a.completedAt!));
     final doneCount = all.where((i) => i.isDone).length;
 
+    final canMassEdit = !folder.isShared && all.isNotEmpty;
+    // Edit list in the user's drag order; links added meanwhile go on top.
+    final byId = {for (final i in all) i.id: i};
+    final editItems = [
+      for (final i in all)
+        if (!_editOrder.contains(i.id)) i,
+      for (final id in _editOrder)
+        if (byId[id] != null) byId[id]!,
+    ];
+    final picked = [
+      for (final i in editItems)
+        if (_picked.contains(i.id)) i
+    ];
+
     return Scaffold(
-      floatingActionButton: folder.canAddLinks
+      bottomNavigationBar: _editing ? _editBar(folder, editItems, picked) : null,
+      floatingActionButton: folder.canAddLinks && !_editing
           ? FloatingActionButton.extended(
               onPressed: () => showAddLinkSheet(context, folderId: folder.id),
               icon: const Icon(Icons.add_link_rounded),
-              label: Text(folder.isShared ? 'Add pin' : 'Add link', style: const TextStyle(fontWeight: FontWeight.w700)),
+              label:
+                  Text(folder.isShared ? 'Add pin' : 'Add link', style: const TextStyle(fontWeight: FontWeight.w700)),
             )
           : null,
-      body: CustomScrollView(slivers: [
-        SliverToBoxAdapter(
-            child: _Hero(
-                folder: folder,
-                color: color,
-                count: all.length,
-                doneCount: doneCount,
-                members: members,
-                meId: state.user?.userId)),
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-          sliver: SliverToBoxAdapter(
-            child: Row(children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(children: [
-                    _chip('All', active == null, () => setState(() => _filter = null)),
-                    for (final f in filters) _chip(f, active == f, () => setState(() => _filter = f)),
-                  ]),
-                ),
-              ),
-              const SizedBox(width: 8),
-              SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(value: false, icon: Icon(Icons.view_agenda_outlined, size: 18)),
-                  ButtonSegment(value: true, icon: Icon(Icons.grid_view_rounded, size: 18)),
-                ],
-                selected: {_grid},
-                showSelectedIcon: false,
-                onSelectionChanged: (s) => setState(() => _grid = s.first),
-                style: const ButtonStyle(visualDensity: VisualDensity.compact),
-              ),
-            ]),
-          ),
-        ),
-        if (visible.isEmpty)
-          SliverFillRemaining(
-            hasScrollBody: false,
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Text(
-                folder.canAddLinks
-                    ? 'Nothing here yet. Share a link from Instagram, YouTube or TikTok, or tap ${folder.isShared ? 'Add pin' : 'Add link'}.'
-                    : 'Nothing here yet.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.inkSoft, height: 1.4),
-              ),
-            ),
-          )
-        else ...[
-          ..._itemSlivers(todo, folder, color, state, topPadding: 4),
-          if (done.isNotEmpty) ...[
+      body: RefreshIndicator(
+        onRefresh: context.read<AppState>().refresh,
+        // The hero is part of the scroll view, so a pull from the very top refreshes.
+        child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
+          SliverToBoxAdapter(
+              child: _Hero(
+                  folder: folder,
+                  color: color,
+                  count: all.length,
+                  doneCount: doneCount,
+                  members: members,
+                  meId: state.user?.userId,
+                  editing: _editing,
+                  onMassEdit: canMassEdit ? (_editing ? _stopEditing : () => _startEditing(all)) : null)),
+          if (!_editing)
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 12, 4),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
               sliver: SliverToBoxAdapter(
                 child: Row(children: [
-                  Text('Done', style: headStyle(16, color: AppColors.inkSoft)),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(children: [
+                        _chip('All', active == null, () => setState(() => _filter = null)),
+                        for (final f in filters) _chip(f, active == f, () => setState(() => _filter = f)),
+                      ]),
+                    ),
+                  ),
                   const SizedBox(width: 8),
-                  Text('${done.length}', style: const TextStyle(color: AppColors.inkFaint, fontWeight: FontWeight.w700)),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () => setState(() => _doneCollapsed = !_doneCollapsed),
-                    child: Text(_doneCollapsed ? 'Show' : 'Hide'),
+                  SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(value: false, icon: Icon(Icons.view_agenda_outlined, size: 18)),
+                      ButtonSegment(value: true, icon: Icon(Icons.grid_view_rounded, size: 18)),
+                    ],
+                    selected: {_grid},
+                    showSelectedIcon: false,
+                    onSelectionChanged: (s) => setState(() => _grid = s.first),
+                    style: const ButtonStyle(visualDensity: VisualDensity.compact),
                   ),
                 ]),
               ),
             ),
-            if (!_doneCollapsed) ..._itemSlivers(done, folder, color, state, topPadding: 0),
+          if (folder.isUncategorized && !_editing && all.isNotEmpty) SliverToBoxAdapter(child: _retryBanner()),
+          if (_editing)
+            ..._editSlivers(editItems, color)
+          else if (visible.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Text(
+                  folder.canAddLinks
+                      ? 'Nothing here yet. Share a link from Instagram, YouTube or TikTok, or tap ${folder.isShared ? 'Add pin' : 'Add link'}.'
+                      : 'Nothing here yet.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: AppColors.inkSoft, height: 1.4),
+                ),
+              ),
+            )
+          else ...[
+            ..._todoSlivers(todo, folder, color, state),
+            if (done.isNotEmpty) ...[
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 12, 4),
+                sliver: SliverToBoxAdapter(
+                  child: Row(children: [
+                    Text('Done', style: headStyle(16, color: AppColors.inkSoft)),
+                    const SizedBox(width: 8),
+                    Text('${done.length}',
+                        style: const TextStyle(color: AppColors.inkFaint, fontWeight: FontWeight.w700)),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () => setState(() => _doneCollapsed = !_doneCollapsed),
+                      child: Text(_doneCollapsed ? 'Show' : 'Hide'),
+                    ),
+                  ]),
+                ),
+              ),
+              if (!_doneCollapsed) ..._itemSlivers(done, folder, color, state, topPadding: 0),
+            ],
+            const SliverToBoxAdapter(child: SizedBox(height: 110)),
           ],
-          const SliverToBoxAdapter(child: SizedBox(height: 110)),
-        ],
-      ]),
+        ]),
+      ),
     );
   }
 
+  /// The to-do links. In a personal folder that uses sub-categories they are grouped under
+  /// a header per sub-category (links without one come first); otherwise one plain list.
+  List<Widget> _todoSlivers(List<Item> todo, Folder folder, Color color, AppState state) {
+    final subs = todo.map((i) => i.tag).whereType<String>().toSet().toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    if (folder.isShared || subs.isEmpty) {
+      return _itemSlivers(todo, folder, color, state, topPadding: 4);
+    }
+    final loose = todo.where((i) => i.tag == null).toList();
+    return [
+      ..._itemSlivers(loose, folder, color, state, topPadding: 4),
+      for (final name in subs) ...[
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+          sliver: SliverToBoxAdapter(
+            child: Row(children: [
+              Icon(Icons.subdirectory_arrow_right_rounded, size: 18, color: color),
+              const SizedBox(width: 6),
+              Flexible(child: Text(name, overflow: TextOverflow.ellipsis, style: headStyle(15))),
+              const SizedBox(width: 8),
+              Text('${todo.where((i) => i.tag == name).length}',
+                  style: const TextStyle(color: AppColors.inkFaint, fontWeight: FontWeight.w700)),
+            ]),
+          ),
+        ),
+        ..._itemSlivers(todo.where((i) => i.tag == name).toList(), folder, color, state, topPadding: 0),
+      ],
+    ];
+  }
+
   /// One list or grid of links (used for the to-do part and the Done part).
-  List<Widget> _itemSlivers(List<Item> items, Folder folder, Color color, AppState state, {required double topPadding}) {
+  List<Widget> _itemSlivers(List<Item> items, Folder folder, Color color, AppState state,
+      {required double topPadding}) {
     if (items.isEmpty) return const [];
     final me = state.user?.userId;
     VoidCallback? toggle(Item i) => state.canMarkDone(i) ? () => toggleDone(context, i) : null;
@@ -207,6 +368,125 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     ];
   }
 
+  /// Mass-edit list: a checkbox and a drag handle on every link.
+  List<Widget> _editSlivers(List<Item> items, Color color) => [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 110),
+          sliver: SliverReorderableList(
+            itemCount: items.length,
+            onReorderItem: _reorder,
+            itemBuilder: (context, i) {
+              final item = items[i];
+              final on = _picked.contains(item.id);
+              void toggle() => setState(() => on ? _picked.remove(item.id) : _picked.add(item.id));
+              return Material(
+                key: ValueKey(item.id),
+                color: Colors.transparent,
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  decoration: BoxDecoration(
+                    color: on ? FolderPalette.soft(color) : AppColors.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: on ? color : AppColors.line),
+                  ),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: toggle,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
+                      child: Row(children: [
+                        ReorderableDragStartListener(
+                          index: i,
+                          child: const Padding(
+                            padding: EdgeInsets.all(10),
+                            child: Icon(Icons.drag_handle_rounded, color: AppColors.inkFaint),
+                          ),
+                        ),
+                        LinkThumbnail(item: item, color: color, size: 44),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(item.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.w600)),
+                        ),
+                        Checkbox(value: on, onChanged: (_) => toggle()),
+                      ]),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ];
+
+  Widget _editBar(Folder folder, List<Item> all, List<Item> picked) {
+    final none = picked.isEmpty;
+    final everything = picked.length == all.length;
+    // Explicit width: the app theme gives buttons an unbounded minimum width, which is
+    // what squeezed everything in a single Row before.
+    const compact = Size(0, 46);
+    return SafeArea(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+        decoration:
+            const BoxDecoration(color: AppColors.surface, border: Border(top: BorderSide(color: AppColors.line))),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Row(children: [
+            TextButton(
+              onPressed: () => setState(() {
+                if (everything) {
+                  _picked.clear();
+                } else {
+                  _picked.addAll(all.map((i) => i.id));
+                }
+              }),
+              style: TextButton.styleFrom(minimumSize: const Size(0, 40)),
+              child: Text(everything ? 'Select none' : 'Select all'),
+            ),
+            Expanded(
+              child: Text(
+                none ? '' : '${picked.length} selected',
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: AppColors.inkSoft, fontWeight: FontWeight.w600),
+              ),
+            ),
+            TextButton(
+              onPressed: _stopEditing,
+              style: TextButton.styleFrom(minimumSize: const Size(0, 40)),
+              child: const Text('Done', style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ]),
+          if (!none) ...[
+            const SizedBox(height: 4),
+            Row(children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _moveSelected(folder, picked),
+                  style: OutlinedButton.styleFrom(minimumSize: compact),
+                  icon: const Icon(Icons.drive_file_move_outline, size: 18),
+                  label: const Text('Move'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () => _deleteSelected(picked),
+                  style: FilledButton.styleFrom(minimumSize: compact, backgroundColor: const Color(0xFFC0392B)),
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  label: const Text('Delete'),
+                ),
+              ),
+            ]),
+          ],
+        ]),
+      ),
+    );
+  }
+
   Widget _chip(String label, bool selected, VoidCallback onTap) => Padding(
         padding: const EdgeInsets.only(right: 8),
         child: ChoiceChip(
@@ -235,9 +515,13 @@ class _Hero extends StatelessWidget {
     required this.members,
     this.doneCount = 0,
     this.meId,
+    this.editing = false,
+    this.onMassEdit,
   });
 
   final Folder folder;
+  final bool editing;
+  final VoidCallback? onMassEdit;
   final int doneCount;
   final String? meId;
   final Color color;
@@ -252,9 +536,8 @@ class _Hero extends StatelessWidget {
     final others = members.where((m) => m.userId != meId).map((m) => m.displayName).toList();
     final pins = '${count == 1 ? '1 pin' : '$count pins'}$done';
     if (others.isEmpty) return '$pins · only you so far';
-    final names = others.length <= 2
-        ? others.join(' & ')
-        : '${others.take(others.length - 1).join(', ')} & ${others.last}';
+    final names =
+        others.length <= 2 ? others.join(' & ') : '${others.take(others.length - 1).join(', ')} & ${others.last}';
     return '$pins · shared with $names';
   }
 
@@ -283,7 +566,10 @@ class _Hero extends StatelessWidget {
           const Spacer(),
           if (folder.isShared && folder.isOwner)
             roundButton(Icons.person_add_alt_1_rounded, 'Invite', () => showInviteSheet(context, folder)),
-          if (!folder.isUncategorized && folder.isOwner) ...[
+          if (onMassEdit != null)
+            roundButton(editing ? Icons.close_rounded : Icons.checklist_rounded, editing ? 'Done editing' : 'Select',
+                onMassEdit!),
+          if (!folder.isUncategorized && folder.isOwner && !editing) ...[
             const SizedBox(width: 8),
             roundButton(Icons.edit_rounded, 'Edit', () => showAddFolderSheet(context, editing: folder)),
           ],
@@ -306,7 +592,8 @@ class _Hero extends StatelessWidget {
         ]),
         if (folder.isShared && !folder.canAddLinks) ...[
           const SizedBox(height: 10),
-          Text('You can view this board', style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12.5)),
+          Text('You can view this board',
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12.5)),
         ],
       ]),
     );

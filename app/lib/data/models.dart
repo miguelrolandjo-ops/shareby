@@ -3,6 +3,8 @@
 /// API's JSON (`toApi`/`fromApi`).
 library;
 
+import 'url_utils.dart';
+
 /// Pseudo-folder for personal saves that have no collection.
 const kUncategorizedId = '__uncategorized__';
 
@@ -149,6 +151,7 @@ class Item {
     this.completedBy,
     this.completedByName,
     this.completionUpdatedAt,
+    this.sortOrder,
     this.deleted = false,
   });
 
@@ -188,6 +191,10 @@ class Item {
   final DateTime? completionUpdatedAt;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  /// Manual position inside a folder (lower = earlier). Device-local like [viewCount];
+  /// null = never reordered, so it shows first, newest first.
+  final int? sortOrder;
   final bool deleted;
 
   bool get isNew => status == 'new';
@@ -202,6 +209,9 @@ class Item {
     bool clearTag = false,
     String? status,
     int? viewCount,
+    String? suggestedFolderId,
+    double? confidence,
+    int? sortOrder,
     DateTime? updatedAt,
     bool? deleted,
     DateTime? completedAt,
@@ -219,8 +229,8 @@ class Item {
         thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
         tag: clearTag ? null : (tag ?? this.tag),
         status: status ?? this.status,
-        suggestedFolderId: suggestedFolderId,
-        confidence: confidence,
+        suggestedFolderId: suggestedFolderId ?? this.suggestedFolderId,
+        confidence: confidence ?? this.confidence,
         viewCount: viewCount ?? this.viewCount,
         addedBy: addedBy,
         addedByName: addedByName,
@@ -228,6 +238,7 @@ class Item {
         completedBy: clearCompleted ? null : (completedBy ?? this.completedBy),
         completedByName: clearCompleted ? null : (completedByName ?? this.completedByName),
         completionUpdatedAt: completionUpdatedAt ?? this.completionUpdatedAt,
+        sortOrder: sortOrder ?? this.sortOrder,
         createdAt: createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
         deleted: deleted ?? this.deleted,
@@ -245,6 +256,7 @@ class Item {
         'suggested_folder_id': suggestedFolderId,
         'confidence': confidence,
         'view_count': viewCount,
+        'sort_order': sortOrder,
         'added_by': addedBy,
         'added_by_name': addedByName,
         'completed_at': _isoOrNull(completedAt),
@@ -261,7 +273,7 @@ class Item {
         id: m['id'] as String,
         folderId: m['folder_id'] as String?,
         url: m['url'] as String,
-        title: m['title'] as String,
+        title: decodeHtmlEntities(m['title'] as String),
         source: m['source'] as String,
         thumbnailUrl: m['thumbnail_url'] as String?,
         tag: m['tag'] as String?,
@@ -269,6 +281,7 @@ class Item {
         suggestedFolderId: m['suggested_folder_id'] as String?,
         confidence: (m['confidence'] as num?)?.toDouble() ?? 0,
         viewCount: (m['view_count'] as int?) ?? 0,
+        sortOrder: m['sort_order'] as int?,
         addedBy: m['added_by'] as String?,
         addedByName: m['added_by_name'] as String?,
         completedAt: _parseOrNull(m['completed_at']),
@@ -304,7 +317,7 @@ class Item {
         id: j['id'] as String,
         folderId: j['folder_id'] as String?,
         url: j['url'] as String,
-        title: j['title'] as String,
+        title: decodeHtmlEntities(j['title'] as String),
         source: (j['source'] as String?) ?? 'web',
         thumbnailUrl: j['thumbnail_url'] as String?,
         tag: j['tag'] as String?,

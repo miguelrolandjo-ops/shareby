@@ -33,7 +33,7 @@ class LocalDb {
   static Future<LocalDb> open({String name = 'shareby.db'}) async {
     final db = await openDatabase(
       p.join(await getDatabasesPath(), name),
-      version: 2,
+      version: 3,
       onCreate: _create,
       onUpgrade: _upgrade,
     );
@@ -69,6 +69,7 @@ class LocalDb {
           suggested_folder_id TEXT,
           confidence REAL NOT NULL DEFAULT 0,
           view_count INTEGER NOT NULL DEFAULT 0,
+          sort_order INTEGER,
           added_by TEXT,
           added_by_name TEXT,
           completed_at TEXT,
@@ -113,6 +114,10 @@ class LocalDb {
         ..execute('ALTER TABLE items ADD COLUMN completion_updated_at TEXT');
       await batch.commit(noResult: true);
     }
+    if (oldVersion < 3) {
+      // v3: manual ordering inside a folder (device-local)
+      await db.execute('ALTER TABLE items ADD COLUMN sort_order INTEGER');
+    }
   }
 
   // ---------------------------------------------------------------- reads
@@ -123,7 +128,7 @@ class LocalDb {
   }
 
   Future<List<Item>> items() async {
-    final rows = await _db.query('items', where: 'deleted = 0', orderBy: 'created_at DESC');
+    final rows = await _db.query('items', where: 'deleted = 0', orderBy: 'sort_order ASC, created_at DESC');
     return rows.map(Item.fromDb).toList();
   }
 
@@ -164,6 +169,15 @@ class LocalDb {
   /// Device-local counter for the auto-confirm rule; intentionally not synced.
   Future<void> setViewCount(String itemId, int count) async {
     await _db.update('items', {'view_count': count}, where: 'id = ?', whereArgs: [itemId]);
+  }
+
+  /// Manual order inside a folder: ids in display order. Device-local, never synced.
+  Future<void> setSortOrders(List<String> idsInOrder) async {
+    await _db.transaction((txn) async {
+      for (var i = 0; i < idsInOrder.length; i++) {
+        await txn.update('items', {'sort_order': i}, where: 'id = ?', whereArgs: [idsInOrder[i]]);
+      }
+    });
   }
 
   static Future<void> _enqueue(
@@ -243,10 +257,11 @@ class LocalDb {
 
       for (final i in items) {
         final existing = await txn.query('items',
-            columns: ['dirty', 'view_count'], where: 'id = ?', whereArgs: [i.id], limit: 1);
+            columns: ['dirty', 'view_count', 'sort_order'], where: 'id = ?', whereArgs: [i.id], limit: 1);
         if (existing.isNotEmpty && existing.first['dirty'] == 1) continue;
         final views = existing.isEmpty ? 0 : (existing.first['view_count'] as int? ?? 0);
-        await txn.insert('items', i.copyWith(viewCount: views).toDb(dirty: false),
+        final order = existing.isEmpty ? null : existing.first['sort_order'] as int?;
+        await txn.insert('items', i.copyWith(viewCount: views, sortOrder: order).toDb(dirty: false),
             conflictAlgorithm: ConflictAlgorithm.replace);
       }
 

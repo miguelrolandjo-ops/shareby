@@ -45,6 +45,32 @@ String? youtubeThumbnail(String url) {
   return 'https://img.youtube.com/vi/$id/hqdefault.jpg';
 }
 
+const _namedEntities = {
+  'amp': '&', 'lt': '<', 'gt': '>', 'quot': '"', 'apos': "'", 'nbsp': ' ', 'trade': '™',
+  'copy': '©', 'reg': '®', 'hellip': '…', 'ndash': '–', 'mdash': '—', 'lsquo': '‘', 'rsquo': '’',
+  'ldquo': '“', 'rdquo': '”', 'bull': '•', 'middot': '·', 'deg': '°', 'hearts': '♥',
+};
+
+final _entity = RegExp(r'&(?:#[xX]([0-9a-fA-F]+)|#([0-9]+)|([a-zA-Z][a-zA-Z0-9]*));');
+
+/// Turns HTML entities into the characters they stand for: `&#x2122;&#xfe0f;` -> "™️",
+/// `&amp;` -> "&". Page titles often arrive this way, sometimes escaped twice.
+/// Text without entities comes back unchanged.
+String decodeHtmlEntities(String input) {
+  var s = input;
+  for (var pass = 0; pass < 2 && s.contains('&'); pass++) {
+    final next = s.replaceAllMapped(_entity, (m) {
+      final code = m.group(1) != null ? int.tryParse(m.group(1)!, radix: 16) : int.tryParse(m.group(2) ?? '');
+      if (m.group(3) != null) return _namedEntities[m.group(3)!] ?? m.group(0)!;
+      if (code == null || code <= 0 || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) return m.group(0)!;
+      return String.fromCharCode(code);
+    });
+    if (next == s) break;
+    s = next;
+  }
+  return s;
+}
+
 String fallbackTitle(String url) {
   final host = (Uri.tryParse(url)?.host ?? '').replaceFirst(RegExp(r'^www\.'), '');
   return host.isEmpty ? url : 'Saved from $host';
@@ -55,7 +81,7 @@ bool isFallbackTitle(String title) => title.startsWith('Saved from ');
 /// Share sheets usually send "caption text https://link" — keep the caption as the title.
 String titleFromShareText(String? text, String url) {
   if (text == null) return fallbackTitle(url);
-  final cleaned = text.replaceAll(url, '').replaceAll(RegExp(r'\s+'), ' ').trim();
+  final cleaned = decodeHtmlEntities(text.replaceAll(url, '')).replaceAll(RegExp(r'\s+'), ' ').trim();
   if (cleaned.length < 3) return fallbackTitle(url);
   return cleaned.length > 120 ? '${cleaned.substring(0, 117)}...' : cleaned;
 }

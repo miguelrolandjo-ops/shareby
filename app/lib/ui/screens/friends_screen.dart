@@ -168,7 +168,7 @@ class _SharedBoards extends StatelessWidget {
   Widget build(BuildContext context) {
     final boards = state.sharedFolders;
     return RefreshIndicator(
-      onRefresh: state.syncNow,
+      onRefresh: state.refresh,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
         children: [

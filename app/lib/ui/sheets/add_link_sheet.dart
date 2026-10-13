@@ -4,9 +4,13 @@ import 'package:provider/provider.dart';
 
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../data/title_fetcher.dart';
 import '../../data/url_utils.dart';
 import '../../state/app_state.dart';
 import '../helpers.dart';
+import 'add_folder_sheet.dart';
+
+const _kAutoCreate = '__auto_create__';
 
 /// Save a link: "sort it for me" (auto-suggest) or pick a collection now.
 Future<void> showAddLinkSheet(
@@ -41,17 +45,52 @@ class _AddLinkSheet extends StatefulWidget {
 
 class _AddLinkSheetState extends State<_AddLinkSheet> {
   late final _url = TextEditingController(text: widget.initialUrl ?? '');
-  late final _title = TextEditingController(text: widget.initialTitle ?? '');
+  // A placeholder like "Saved from instagram.com" is never shown as if the user typed it.
+  late final _title = TextEditingController(
+    text: (widget.initialTitle == null || isFallbackTitle(widget.initialTitle!)) ? '' : widget.initialTitle,
+  );
+  bool _lookingUpTitle = false;
   late bool _sortLater = widget.folderId == null && !widget.fromShare;
   late String? _selected = widget.folderId;
   bool _saving = false;
   String? _urlError;
 
   @override
+  void initState() {
+    super.initState();
+    final url = widget.initialUrl;
+    if (url != null && _title.text.trim().isEmpty) _lookUpTitle(url);
+  }
+
+  /// Fills the Title field from the page in the background. Never blocks saving, and never
+  /// overwrites something the user has typed in the meantime.
+  Future<void> _lookUpTitle(String url) async {
+    setState(() => _lookingUpTitle = true);
+    final title = await fetchPageTitle(url);
+    if (!mounted) return;
+    setState(() {
+      _lookingUpTitle = false;
+      if (title != null && _title.text.trim().isEmpty) _title.text = title;
+    });
+  }
+
+  @override
   void dispose() {
     _url.dispose();
     _title.dispose();
     super.dispose();
+  }
+
+  /// Picking a folder saves right away when the link came from another app's share
+  /// sheet (one tap); inside the app it just selects, and "Save link" confirms.
+  void _pick(String id) {
+    setState(() => _selected = id);
+    if (widget.fromShare) _save();
+  }
+
+  Future<void> _createYourself() async {
+    final folder = await showAddFolderSheet(context);
+    if (folder != null && mounted) _pick(folder.id);
   }
 
   Future<void> _paste() async {
@@ -82,7 +121,11 @@ class _AddLinkSheetState extends State<_AddLinkSheet> {
     setState(() => _saving = true);
     final state = context.read<AppState>();
     try {
-      final item = await state.addLink(url: url, title: _title.text, folderId: _sortLater ? null : _selected);
+      var target = _sortLater ? null : _selected;
+      if (target == _kAutoCreate) {
+        target = (await state.autoFolderFor(url: url, title: _title.text)).id;
+      }
+      final item = await state.addLink(url: url, title: _title.text, folderId: target);
       if (!mounted) return;
       final where = item.folderId == null ? 'Uncategorized' : (state.folderById(item.folderId)?.name ?? 'your collection');
       final messenger = ScaffoldMessenger.of(context);
@@ -128,7 +171,7 @@ class _AddLinkSheetState extends State<_AddLinkSheet> {
       TextField(
         controller: _title,
         textCapitalization: TextCapitalization.sentences,
-        decoration: const InputDecoration(hintText: 'What is this? (optional)'),
+        decoration: InputDecoration(hintText: _lookingUpTitle ? 'Looking up the title…' : 'What is this? (optional)'),
       ),
       const SizedBox(height: 16),
       SegmentedButton<bool>(
@@ -151,6 +194,20 @@ class _AddLinkSheetState extends State<_AddLinkSheet> {
           ),
         )
       else ...[
+        ChoiceRow(
+          selected: false,
+          onTap: _createYourself,
+          title: 'Create one yourself',
+          subtitle: 'Name a new folder',
+          leading: const EmojiBadge(emoji: '✏️', color: Color(FolderPalette.grey)),
+        ),
+        ChoiceRow(
+          selected: _selected == _kAutoCreate,
+          onTap: _saving ? () {} : () => _pick(_kAutoCreate),
+          title: 'Auto create suggested folder',
+          subtitle: 'We pick a general name that fits, or reuse one you have',
+          leading: const EmojiBadge(emoji: '✨', color: Color(FolderPalette.amber)),
+        ),
         for (final f in personal) _folderRow(f),
         _folderRow(Folder.uncategorized()),
         if (shared.isNotEmpty) ...[
@@ -162,16 +219,18 @@ class _AddLinkSheetState extends State<_AddLinkSheet> {
         ],
       ],
       const SizedBox(height: 12),
-      FilledButton(
-        onPressed: _saving ? null : _save,
-        child: Text(_saving ? 'Saving...' : 'Save link'),
-      ),
+      // From a share, tapping a folder already saves; only "sort it for me" needs the button.
+      if (!widget.fromShare || _sortLater || _saving)
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: Text(_saving ? 'Saving...' : 'Save link'),
+        ),
     ]);
   }
 
   Widget _folderRow(Folder f, {String? subtitle}) => ChoiceRow(
         selected: _selected == f.id,
-        onTap: () => setState(() => _selected = f.id),
+        onTap: _saving ? () {} : () => _pick(f.id),
         title: f.name,
         subtitle: subtitle,
         leading: EmojiBadge(emoji: f.emoji, color: Color(f.color)),

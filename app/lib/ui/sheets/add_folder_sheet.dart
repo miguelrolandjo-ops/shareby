@@ -56,22 +56,48 @@ class _AddFolderSheetState extends State<_AddFolderSheet> {
 
   Future<void> _delete() async {
     final folder = widget.editing!;
+    final state = context.read<AppState>();
+    final count = state.itemsIn(folder.id).length;
+    var keepLinks = false;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Delete "${folder.name}"?'),
-        content: Text(folder.isShared
-            ? 'The board and its pins are removed for everyone in it.'
-            : 'Its links move to Uncategorized. Nothing you saved is lost.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
-        ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: Text('Delete "${folder.name}"?'),
+          content: folder.isShared
+              ? const Text('The board and its pins are removed for everyone in it.')
+              : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(count == 0 ? 'This folder is empty.' : 'What should happen to the $count ${count == 1 ? 'link' : 'links'} inside?'),
+                  if (count > 0) ...[
+                    const SizedBox(height: 8),
+                    RadioGroup<bool>(
+                      groupValue: keepLinks,
+                      onChanged: (v) => setLocal(() => keepLinks = v ?? false),
+                      child: const Column(children: [
+                        RadioListTile<bool>(
+                          contentPadding: EdgeInsets.zero,
+                          value: false,
+                          title: Text('Delete the links too'),
+                        ),
+                        RadioListTile<bool>(
+                          contentPadding: EdgeInsets.zero,
+                          value: true,
+                          title: Text('Keep them in Uncategorized'),
+                        ),
+                      ]),
+                    ),
+                  ],
+                ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+          ],
+        ),
       ),
     );
     if (ok != true || !mounted) return;
     final navigator = Navigator.of(context);
-    await context.read<AppState>().deleteFolder(folder);
+    await state.deleteFolder(folder, keepLinks: keepLinks);
     navigator.pop();
   }
 

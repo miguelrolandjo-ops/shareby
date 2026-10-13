@@ -7,6 +7,7 @@ import '../../data/models.dart';
 import '../../state/app_state.dart';
 import '../helpers.dart';
 import '../widgets/common.dart';
+import 'add_folder_sheet.dart';
 
 /// Review an auto-categorized [New] save: confirm the suggestion or pick another folder.
 Future<void> showConfirmItemSheet(BuildContext context, Item item) =>
@@ -32,6 +33,27 @@ class _ConfirmItemSheetState extends State<_ConfirmItemSheet> {
     final name = state.folderById(moveTo ?? widget.item.folderId ?? kUncategorizedId)?.name ?? 'Uncategorized';
     navigator.pop();
     messenger.showSnackBar(SnackBar(content: Text('Filed in $name')));
+  }
+
+  bool _busy = false;
+
+  Future<void> _createYourself() async {
+    final folder = await showAddFolderSheet(context);
+    if (folder == null || !mounted) return;
+    await _confirm(moveTo: folder.id);
+  }
+
+  Future<void> _autoCreate() async {
+    setState(() => _busy = true);
+    try {
+      final folder = await context.read<AppState>().autoFolderFor(url: widget.item.url, title: widget.item.title);
+      if (!mounted) return;
+      await _confirm(moveTo: folder.id);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      toast(context, friendlyError(e));
+    }
   }
 
   @override
@@ -110,6 +132,20 @@ class _ConfirmItemSheetState extends State<_ConfirmItemSheet> {
         OutlinedButton(onPressed: () => setState(() => _changing = true), child: const Text('Choose a different folder')),
       ] else ...[
         FieldLabel(item.isNew ? 'File it in' : 'Move to'),
+        ChoiceRow(
+          selected: false,
+          onTap: _busy ? () {} : _createYourself,
+          title: 'Create one yourself',
+          subtitle: 'Name a new folder',
+          leading: const EmojiBadge(emoji: '✏️', color: Color(FolderPalette.grey)),
+        ),
+        ChoiceRow(
+          selected: false,
+          onTap: _busy ? () {} : _autoCreate,
+          title: _busy ? 'Creating...' : 'Auto create suggested folder',
+          subtitle: 'We pick a general name that fits, or reuse one you have',
+          leading: const EmojiBadge(emoji: '✨', color: Color(FolderPalette.amber)),
+        ),
         for (final f in [...state.personalFolders, Folder.uncategorized()])
           ChoiceRow(
             selected: f.id == (item.folderId ?? kUncategorizedId),

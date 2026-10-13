@@ -36,9 +36,11 @@ class ShareReceiverActivity : Activity() {
         // The title the source app shared with the link (YouTube etc.), if any.
         val sharedTitle = (subject ?: text.replace(url, "")).trim().ifEmpty { null }
 
+        // Buttons always act immediately. If the page title has already arrived it is saved
+        // with the link; if not, the app looks the title up itself once it has the link.
         val dialog = AlertDialog.Builder(this)
             .setTitle("Save to Shareby")
-            .setMessage(sharedTitle?.take(140) ?: "Loading title…")
+            .setMessage(sharedTitle?.take(140) ?: url.take(140))
             .setPositiveButton("Save") { _, _ ->
                 ShareInbox.add(applicationContext, url, caption, choose = false)
                 Toast.makeText(applicationContext, "Saved to Shareby. We'll sort it for you", Toast.LENGTH_SHORT).show()
@@ -54,13 +56,13 @@ class ShareReceiverActivity : Activity() {
             .show()
 
         if (sharedTitle == null) {
-            // No title was shared (e.g. Instagram sends only the URL): read it from the page.
+            // No title was shared (e.g. Instagram sends only the URL): try to show one here.
             Thread {
                 val title = fetchTitle(url)
                 runOnUiThread {
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    if (title != null) caption = title
-                    dialog.setMessage((title ?: url).take(140))
+                    if (isFinishing || isDestroyed || title == null) return@runOnUiThread
+                    caption = title
+                    dialog.setMessage(title.take(140))
                 }
             }.start()
         }
@@ -86,9 +88,17 @@ class ShareReceiverActivity : Activity() {
             String(buf, 0, n, Charsets.UTF_8)
         }
         val raw = ogTitle.find(html)?.groupValues?.get(1) ?: titleTag.find(html)?.groupValues?.get(1)
-        raw?.let { Html.fromHtml(it, Html.FROM_HTML_MODE_LEGACY).toString().trim() }?.ifEmpty { null }
+        raw?.let { Html.fromHtml(it, Html.FROM_HTML_MODE_LEGACY).toString().trim() }
+            ?.takeIf { it.isNotEmpty() && !isGenericTitle(it) }
     } catch (e: Exception) {
         null
+    }
+
+    /** Login walls and site names say nothing about the link itself. */
+    private fun isGenericTitle(t: String): Boolean {
+        val l = t.lowercase()
+        return l == "instagram" || l == "tiktok" || l == "youtube" || l.startsWith("login") ||
+            l.startsWith("log in") || l.contains("make your day") || l.contains("• instagram photos and videos")
     }
 
     private val ogTitle = Regex(

@@ -9,6 +9,7 @@ import '../sheets/add_folder_sheet.dart';
 import '../sheets/confirm_item_sheet.dart';
 import '../widgets/common.dart';
 import 'group_detail_screen.dart';
+import 'refactor_screen.dart';
 import 'profile_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -33,8 +34,10 @@ class HomeScreen extends StatelessWidget {
       body: SafeArea(
         bottom: false,
         child: RefreshIndicator(
-          onRefresh: state.syncNow,
+          onRefresh: state.refresh,
           child: ListView(
+            // Always pullable, even when everything fits on screen.
+            physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 110),
             children: [
               _Header(state: state),
@@ -65,9 +68,10 @@ class HomeScreen extends StatelessWidget {
                   crossAxisSpacing: 12,
                   childAspectRatio: 1.05,
                 ),
-                itemCount: tiles.length + 1,
+                itemCount: tiles.length + (state.personalItems.isEmpty ? 1 : 2),
                 itemBuilder: (context, i) {
                   if (i == tiles.length) return const _NewFolderCard();
+                  if (i == tiles.length + 1) return const _RefactorCard();
                   final f = tiles[i];
                   final inside = state.itemsIn(f.id);
                   return FolderCard(
@@ -251,6 +255,33 @@ class _NewFolderCard extends StatelessWidget {
             Icon(Icons.add_rounded, size: 28, color: AppColors.brand),
             SizedBox(height: 6),
             Text('New folder', style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.brand)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _RefactorCard extends StatelessWidget {
+  const _RefactorCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => RefactorScreen.open(context),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppColors.line, width: 2),
+          ),
+          child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.auto_awesome_rounded, size: 26, color: AppColors.brand),
+            SizedBox(height: 6),
+            Text('Refactor', style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.brand)),
+            Text('Regroup all links', style: TextStyle(fontSize: 12, color: AppColors.inkSoft)),
           ]),
         ),
       ),

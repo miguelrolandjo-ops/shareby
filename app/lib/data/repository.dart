@@ -3,9 +3,12 @@ import 'package:uuid/uuid.dart';
 import '../core/config.dart';
 import '../core/theme.dart';
 import 'categorizer.dart';
+import 'folder_namer.dart';
 import 'local_db.dart';
 import 'models.dart';
+import 'refactor_planner.dart';
 import 'session_store.dart';
+import 'title_fetcher.dart';
 import 'url_utils.dart';
 
 /// Every change the user makes goes through here.
@@ -13,6 +16,13 @@ import 'url_utils.dart';
 /// Writes land in SQLite first, so the app works fully offline. When signed in,
 /// each write also queues an outbox op in the same transaction; [SyncService]
 /// pushes those to the server whenever it can reach it.
+class RetryResult {
+  const RetryResult({required this.matched, required this.unmatched});
+
+  final int matched;
+  final int unmatched;
+}
+
 class Repository {
   Repository({required this.db, required this.sessions, Categorizer? categorizer})
       : categorizer = categorizer ?? const KeywordCategorizer(threshold: AppConfig.suggestionThreshold);
@@ -58,6 +68,24 @@ class Repository {
     return folder;
   }
 
+  /// "Auto create suggested folder": returns an existing personal folder that already
+  /// covers this link's topic, or creates a new broad one (e.g. "K-Pop") for it.
+  Future<Folder> autoFolderFor({required String url, String? title}) async {
+    var text = (title ?? '').trim();
+    if (text.isEmpty || isFallbackTitle(text)) {
+      text = await fetchPageTitle(url) ?? text;
+    }
+    final folders = (await db.folders()).where((f) => !f.isShared && !f.deleted).toList();
+    final proposal = const FolderNamer().propose('$text $url', {for (final f in folders) f.id: f.name});
+
+    if (proposal.existingId != null) {
+      return folders.firstWhere((f) => f.id == proposal.existingId);
+    }
+    final used = folders.map((f) => f.color).toSet();
+    final color = FolderPalette.all.firstWhere((c) => !used.contains(c), orElse: () => FolderPalette.all[folders.length % FolderPalette.all.length]);
+    return createFolder(name: proposal.name, color: color, emoji: proposal.emoji);
+  }
+
   /// Duplicate names are allowed; the copy gets " (2)", " (3)"... to tell them apart.
   Future<String> _uniqueName(String name, {required bool shared}) async {
     final taken = (await db.folders())
@@ -75,13 +103,15 @@ class Repository {
   Future<void> updateFolder(Folder f, {String? name, int? color, String? emoji}) =>
       _save(f.copyWith(name: name?.trim(), color: color, emoji: emoji, updatedAt: _now()));
 
-  /// Deleting a personal folder keeps its links: they move to Uncategorized.
-  Future<void> deleteFolder(Folder f) async {
+  /// Deleting a folder. Personal folders: the links inside are deleted too (default), or
+  /// kept and moved to Uncategorized when [keepLinks] is true. Shared boards always
+  /// remove their pins.
+  Future<void> deleteFolder(Folder f, {bool keepLinks = false}) async {
     final now = _now();
     await _save(f.copyWith(deleted: true, updatedAt: now));
     final inside = (await db.items()).where((i) => i.folderId == f.id);
     for (final item in inside) {
-      await _saveItem(f.isShared
+      await _saveItem(f.isShared || !keepLinks
           ? item.copyWith(deleted: true, updatedAt: now)
           : item.copyWith(clearFolder: true, status: 'confirmed', updatedAt: now));
     }
@@ -96,14 +126,22 @@ class Repository {
   Future<Item> addLink({required String url, String? title, String? folderId}) async {
     final now = _now();
     final user = sessions.current;
-    final cleanTitle = (title == null || title.trim().isEmpty) ? fallbackTitle(url) : title.trim();
+    var cleanTitle = (title == null || title.trim().isEmpty) ? fallbackTitle(url) : title.trim();
 
     String? target;
     var status = 'confirmed';
     String? suggested;
     var confidence = 0.0;
+    String? previewImage;
 
     if (folderId == null) {
+      // A bare link ("Saved from instagram.com") gives the categorizer nothing to
+      // match, so look up the real page title first.
+      if (isFallbackTitle(cleanTitle)) {
+        final preview = await fetchPagePreview(url);
+        if (preview.title != null) cleanTitle = preview.title!;
+        previewImage = preview.image;
+      }
       final suggestion = await suggestFor('$cleanTitle $url');
       target = suggestion.folderId;
       suggested = suggestion.folderId;
@@ -122,7 +160,7 @@ class Repository {
       url: url,
       title: cleanTitle,
       source: detectSource(url),
-      thumbnailUrl: youtubeThumbnail(url),
+      thumbnailUrl: youtubeThumbnail(url) ?? previewImage,
       status: status,
       suggestedFolderId: suggested,
       confidence: confidence,
@@ -133,6 +171,70 @@ class Repository {
     );
     await _saveItem(item);
     return item;
+  }
+
+  /// Fills in the thumbnail (and a real title, where the link only had a placeholder) for
+  /// saves that have none yet: Instagram, TikTok and other links. Personal saves only, since
+  /// edits to a shared board you can only view would be rejected. [tried] keeps failed
+  /// lookups from being retried over and over in one session. Returns how many changed.
+  Future<int> backfillPreviews(Set<String> tried, {int limit = 6}) async {
+    final shared = {for (final f in await db.folders()) if (f.isShared) f.id};
+    final todo = (await db.items())
+        .where((i) => i.thumbnailUrl == null && !tried.contains(i.id) && !shared.contains(i.folderId))
+        .take(limit)
+        .toList();
+    var changed = 0;
+    for (final item in todo) {
+      tried.add(item.id);
+      final derived = youtubeThumbnail(item.url);
+      final preview = derived == null ? await fetchPagePreview(item.url) : const PagePreview();
+      final image = derived ?? preview.image;
+      final betterTitle = isFallbackTitle(item.title) ? preview.title : null;
+      if (image == null && betterTitle == null && preview.isEmpty) continue; // unreachable: try next time
+      await _saveItem(item.copyWith(
+        thumbnailUrl: image ?? '', // '' = looked up, nothing to show
+        title: betterTitle,
+        updatedAt: _now(),
+      ));
+      changed++;
+    }
+    return changed;
+  }
+
+/// Uncategorized "Refactor": tries every link there against your folders once more.
+  ///  * a match becomes a [New] suggestion, like any fresh save, so you can confirm it;
+  ///  * no match stays in Uncategorized and is marked confirmed, so it raises no "new item"
+  ///    notification again.
+  /// Links that only have a placeholder title get their real title looked up first.
+  Future<RetryResult> retryUncategorized() async {
+    final stuck = (await db.items()).where((i) => i.folderId == null).toList();
+    var matched = 0;
+    // Look up titles a few at a time; each lookup is network-bound.
+    for (var start = 0; start < stuck.length; start += 4) {
+      final batch = stuck.skip(start).take(4).toList();
+      final previews = await Future.wait([
+        for (final item in batch) isFallbackTitle(item.title) ? fetchPagePreview(item.url) : Future.value(const PagePreview()),
+      ]);
+      for (var i = 0; i < batch.length; i++) {
+        final item = batch[i];
+        final preview = previews[i];
+        final title = preview.title ?? item.title;
+        final suggestion = await suggestFor('$title ${item.url}');
+        final hit = suggestion.folderId != null;
+        if (hit) matched++;
+        await _saveItem(item.copyWith(
+          title: preview.title,
+          thumbnailUrl: item.thumbnailUrl == null ? preview.image : null,
+          folderId: suggestion.folderId,
+          suggestedFolderId: suggestion.folderId,
+          confidence: suggestion.confidence,
+          status: hit ? 'new' : 'confirmed',
+          viewCount: hit ? 0 : null,
+          updatedAt: _now(),
+        ));
+      }
+    }
+    return RetryResult(matched: matched, unmatched: stuck.length - matched);
   }
 
   /// Auto-categorization only ever considers personal folders.
@@ -157,15 +259,71 @@ class Repository {
   /// Confirms a [New] item, optionally into a different personal folder.
   Future<void> confirmItem(Item item, {String? moveTo}) async {
     final target = moveTo ?? item.folderId ?? kUncategorizedId;
+    final changesFolder = target != (item.folderId ?? kUncategorizedId);
     await _saveItem(item.copyWith(
       folderId: target == kUncategorizedId ? null : target,
       clearFolder: target == kUncategorizedId,
+      clearTag: changesFolder, // a sub-category belongs to one folder
       status: 'confirmed',
       updatedAt: _now(),
     ));
   }
 
   Future<void> moveItem(Item item, String folderId) => confirmItem(item, moveTo: folderId);
+
+  /// Mass edit: move several links to one personal folder (or Uncategorized).
+  Future<void> moveItems(List<Item> items, String folderId) async {
+    for (final item in items) {
+      await confirmItem(item, moveTo: folderId);
+    }
+  }
+
+  Future<void> deleteItems(List<Item> items) async {
+    for (final item in items) {
+      await deleteItem(item);
+    }
+  }
+
+  /// Manual order inside a folder (ids in display order). Stays on this device.
+  Future<void> setItemOrder(List<String> idsInOrder) => db.setSortOrders(idsInOrder);
+
+  /// Applies a reviewed [RefactorPlan]: creates (or reuses) a personal folder per group,
+  /// moves the links in, then removes old personal folders left empty.
+  Future<int> applyRefactor(RefactorPlan plan) async {
+    final items = {for (final i in await db.items()) i.id: i};
+    final folders = (await db.folders()).where((f) => !f.isShared && !f.deleted).toList();
+    final touchedFolderIds = <String>{};
+    var moved = 0;
+    var colorIndex = 0;
+
+    for (final group in plan.groups) {
+      final members = [for (final id in group.itemIds) if (items[id] != null) items[id]!];
+      if (members.isEmpty) continue;
+      final existing = folders.where((f) => f.name.toLowerCase() == group.name.toLowerCase());
+      final Folder target = existing.isNotEmpty
+          ? existing.first
+          : await createFolder(
+              name: group.name,
+              color: FolderPalette.all[colorIndex++ % FolderPalette.all.length],
+              emoji: group.emoji,
+            );
+      for (final item in members) {
+        if (item.folderId == target.id) continue;
+        if (item.folderId != null) touchedFolderIds.add(item.folderId!);
+        await confirmItem(item, moveTo: target.id);
+        moved++;
+      }
+    }
+
+    // An old folder that the refactor emptied has nothing left to hold.
+    final remaining = await db.items();
+    for (final f in folders) {
+      if (touchedFolderIds.contains(f.id) && !remaining.any((i) => i.folderId == f.id)) {
+        await _save(f.copyWith(deleted: true, updatedAt: _now()));
+      }
+    }
+    return moved;
+  }
 
   /// Tags are a personal-folder feature; shared boards are curated together without them.
   Future<void> setTag(Item item, String? tag) async {
@@ -218,6 +376,7 @@ class Repository {
       suggestedFolderId: current.suggestedFolderId,
       confidence: current.confidence,
       viewCount: current.viewCount,
+      sortOrder: current.sortOrder,
       addedBy: current.addedBy,
       addedByName: current.addedByName,
       completedAt: previous.completedAt,

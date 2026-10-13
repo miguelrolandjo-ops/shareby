@@ -47,9 +47,10 @@ class _ItemActions extends StatelessWidget {
       if (!folder.isShared) ...[
         if (item.isNew)
           _action(context, Icons.fact_check_rounded, 'Review suggestion', () => showConfirmItemSheet(host, item)),
-        _action(context, Icons.sell_outlined, item.tag == null ? 'Add a tag' : 'Edit tag "${item.tag}"',
+        _action(context, Icons.sell_outlined, item.tag == null ? 'Set sub-category' : 'Sub-category: ${item.tag}',
             () => _editTag(state)),
-        _action(context, Icons.drive_file_move_outline, 'Move to another folder', () => showConfirmItemSheet(host, item)),
+        _action(
+            context, Icons.drive_file_move_outline, 'Move to another folder', () => showConfirmItemSheet(host, item)),
       ],
       if (canDelete)
         _action(context, Icons.delete_outline_rounded, folder.isShared ? 'Remove pin' : 'Delete link', () async {
@@ -58,7 +59,8 @@ class _ItemActions extends StatelessWidget {
     ]);
   }
 
-  Widget _action(BuildContext context, IconData icon, String label, Future<void> Function() onTap, {bool danger = false}) {
+  Widget _action(BuildContext context, IconData icon, String label, Future<void> Function() onTap,
+      {bool danger = false}) {
     final color = danger ? const Color(0xFFC0392B) : AppColors.ink;
     return ListTile(
       contentPadding: EdgeInsets.zero,
@@ -73,25 +75,84 @@ class _ItemActions extends StatelessWidget {
 
   Future<void> _editTag(AppState state) async {
     if (!host.mounted) return;
-    final controller = TextEditingController(text: item.tag ?? '');
-    final tag = await showDialog<String>(
-      context: host,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Tag'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 40,
-          decoration: const InputDecoration(hintText: 'e.g. Must try'),
+    final siblings = state.itemsIn(item.folderId ?? kUncategorizedId);
+    final existing = siblings.map((i) => i.tag).whereType<String>().toSet().toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final picked =
+        await showAppSheet<_SubChoice>(host, (_) => _SubCategorySheet(current: item.tag, existing: existing));
+    if (picked == null) return;
+    await state.setTag(item, picked.name);
+  }
+}
+
+/// What the user chose in the sub-category sheet; [name] null = remove it.
+class _SubChoice {
+  const _SubChoice(this.name);
+  final String? name;
+}
+
+/// Sub-categories live inside one folder (e.g. "K-Pop" > "Dance practice"). Pick one the
+/// folder already has, make a new one, or clear it.
+class _SubCategorySheet extends StatefulWidget {
+  const _SubCategorySheet({required this.current, required this.existing});
+
+  final String? current;
+  final List<String> existing;
+
+  @override
+  State<_SubCategorySheet> createState() => _SubCategorySheetState();
+}
+
+class _SubCategorySheetState extends State<_SubCategorySheet> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submitNew() {
+    final name = _controller.text.trim();
+    if (name.isEmpty) return;
+    // Reuse the folder's spelling if it already has this sub-category.
+    final same = widget.existing.where((e) => e.toLowerCase() == name.toLowerCase());
+    Navigator.of(context).pop(_SubChoice(same.isNotEmpty ? same.first : name));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+      const SheetTitle('Sub-category', subtitle: 'Group links inside this folder.'),
+      TextField(
+        controller: _controller,
+        textCapitalization: TextCapitalization.sentences,
+        maxLength: 40,
+        decoration: InputDecoration(
+          hintText: 'New sub-category, e.g. Dance practice',
+          counterText: '',
+          suffixIcon: IconButton(tooltip: 'Add', icon: const Icon(Icons.check_rounded), onPressed: _submitNew),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, controller.text), child: const Text('Save')),
-        ],
+        onChanged: (_) => setState(() {}),
+        onSubmitted: (_) => _submitNew(),
       ),
-    );
-    controller.dispose();
-    if (tag == null) return;
-    await state.setTag(item, tag);
+      if (widget.existing.isNotEmpty) ...[
+        const FieldLabel('In this folder'),
+        for (final name in widget.existing)
+          ChoiceRow(
+            selected: name == widget.current,
+            onTap: () => Navigator.of(context).pop(_SubChoice(name)),
+            title: name,
+            leading: const EmojiBadge(emoji: '📂', color: Color(FolderPalette.grey)),
+          ),
+      ],
+      if (widget.current != null)
+        ChoiceRow(
+          selected: false,
+          onTap: () => Navigator.of(context).pop(const _SubChoice(null)),
+          title: 'No sub-category',
+          leading: const EmojiBadge(emoji: '✖️', color: Color(FolderPalette.grey)),
+        ),
+    ]);
   }
 }

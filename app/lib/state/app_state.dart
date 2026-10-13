@@ -7,6 +7,7 @@ import '../data/api_client.dart';
 import '../data/auth_service.dart';
 import '../data/local_db.dart';
 import '../data/models.dart';
+import '../data/refactor_planner.dart';
 import '../data/repository.dart';
 import '../data/session_store.dart';
 import '../data/share_intake.dart';
@@ -113,19 +114,54 @@ class AppState extends ChangeNotifier {
 
   Future<void> init() async {
     await repo.seedIfNeeded();
-    await _ingestShares();
     await _countImpressions(force: true);
     await reload();
-    _periodic = Timer.periodic(AppConfig.syncInterval, (_) => syncNow());
-    unawaited(syncNow());
+    _periodic = Timer.periodic(AppConfig.syncInterval, (_) => unawaited(_tick()));
+    unawaited(_tick());
+  }
+
+  /// Background upkeep that also runs when signed out: pick up shares, fill in previews, sync.
+  Future<void> _tick() async {
+    await _ingestShares();
+    await reload();
+    unawaited(_backfillPreviews());
+    await syncNow();
+  }
+
+  /// Pull-to-refresh: everything above, and waits for it so the spinner means something.
+  Future<void> refresh() async {
+    await _ingestShares();
+    await reload();
+    await _backfillPreviews();
+    await syncNow();
+  }
+
+  bool _backfilling = false;
+  final Set<String> _previewTried = {};
+
+  /// Instagram, TikTok and other links get their thumbnail (and real title) looked up on-device.
+  Future<void> _backfillPreviews() async {
+    if (_backfilling) return;
+    _backfilling = true;
+    try {
+      while (await repo.backfillPreviews(_previewTried) > 0) {
+        await reload();
+        _scheduleSync();
+      }
+    } catch (_) {
+      // Previews are a nicety; never let a lookup problem surface to the user.
+    } finally {
+      _backfilling = false;
+    }
   }
 
   /// App came back to the foreground (e.g. after sharing from Instagram).
   Future<void> onResumed() async {
-    await _ingestShares();
     await _countImpressions();
     await reload();
-    unawaited(syncNow());
+    // Shared links are saved (and their titles looked up) in the background, so the app
+    // opens instantly; the list updates itself when they land.
+    unawaited(_tick());
   }
 
   Future<void> reload() async {
@@ -150,6 +186,7 @@ class AppState extends ChangeNotifier {
     if (saved > 0) {
       _flashes.add(saved == 1 ? 'Saved 1 link from another app' : 'Saved $saved links from other apps');
       _scheduleSync();
+      unawaited(_backfillPreviews());
     }
   }
 
@@ -222,15 +259,38 @@ class AppState extends ChangeNotifier {
   Future<Folder> createFolder({required String name, required int color, required String emoji, bool shared = false}) =>
       _mutate(() => repo.createFolder(name: name, color: color, emoji: emoji, isShared: shared));
 
+  Future<Folder> autoFolderFor({required String url, String? title}) =>
+      _mutate(() => repo.autoFolderFor(url: url, title: title));
+
   Future<void> updateFolder(Folder f, {String? name, int? color, String? emoji}) =>
       _mutate(() => repo.updateFolder(f, name: name, color: color, emoji: emoji));
 
-  Future<void> deleteFolder(Folder f) => _mutate(() => repo.deleteFolder(f));
+  Future<void> deleteFolder(Folder f, {bool keepLinks = false}) =>
+      _mutate(() => repo.deleteFolder(f, keepLinks: keepLinks));
 
-  Future<Item> addLink({required String url, String? title, String? folderId}) =>
-      _mutate(() => repo.addLink(url: url, title: title, folderId: folderId));
+  Future<Item> addLink({required String url, String? title, String? folderId}) async {
+    final item = await _mutate(() => repo.addLink(url: url, title: title, folderId: folderId));
+    unawaited(_backfillPreviews());
+    return item;
+  }
 
   Future<void> confirmItem(Item item, {String? moveTo}) => _mutate(() => repo.confirmItem(item, moveTo: moveTo));
+
+  Future<void> moveItems(List<Item> items, String folderId) => _mutate(() => repo.moveItems(items, folderId));
+
+  Future<RetryResult> retryUncategorized() => _mutate(repo.retryUncategorized);
+
+  Future<void> deleteItems(List<Item> items) => _mutate(() => repo.deleteItems(items));
+
+  Future<void> setItemOrder(List<String> idsInOrder) => _mutate(() => repo.setItemOrder(idsInOrder));
+
+  /// Every link in a personal folder or Uncategorized, for regrouping.
+  List<Item> get personalItems {
+    final shared = sharedFolders.map((f) => f.id).toSet();
+    return _items.where((i) => i.folderId == null || !shared.contains(i.folderId)).toList();
+  }
+
+  Future<int> applyRefactor(RefactorPlan plan) => _mutate(() => repo.applyRefactor(plan));
 
   Future<void> moveItem(Item item, String folderId) => _mutate(() => repo.moveItem(item, folderId));
 

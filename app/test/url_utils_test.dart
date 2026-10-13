@@ -29,4 +29,23 @@ void main() {
     expect(titleFromShareText('Resep sambal matah $url', url), 'Resep sambal matah');
     expect(titleFromShareText(url, url), 'Saved from tiktok.com');
   });
+  entityTests();
+}
+
+void entityTests() {
+  test('decodes numeric and named HTML entities in titles', () {
+    expect(decodeHtmlEntities('Dunkin&#x2122;&#xfe0f; &amp; Co'), 'Dunkin™️ & Co');
+    expect(decodeHtmlEntities('Tom &#38; Jerry &#8482;'), 'Tom & Jerry ™');
+    expect(decodeHtmlEntities('Cats &amp;amp; Dogs'), 'Cats & Dogs'); // escaped twice
+  });
+
+  test('leaves plain text and unknown entities alone', () {
+    expect(decodeHtmlEntities('Plain title'), 'Plain title');
+    expect(decodeHtmlEntities('R&D &nosuch; team'), 'R&D &nosuch; team');
+    expect(decodeHtmlEntities('bad &#0; &#xD800; code'), 'bad &#0; &#xD800; code');
+  });
+
+  test('share text caption is decoded too', () {
+    expect(titleFromShareText('Dunkin&#x2122; haul https://e.com/x', 'https://e.com/x'), 'Dunkin™ haul');
+  });
 }
