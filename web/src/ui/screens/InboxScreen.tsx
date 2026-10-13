@@ -36,9 +36,6 @@ export function InboxScreen() {
           );
         })
       )}
-      <div style={{ marginTop: 16 }}>
-        <Note>Auto-sorting only uses your personal folders. Shared boards are never auto-filled.</Note>
-      </div>
     </>
   );
 }

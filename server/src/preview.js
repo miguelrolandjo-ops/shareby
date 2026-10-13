@@ -16,9 +16,19 @@ function isPrivateHost(host) {
     || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
 }
 
+const NAMED = {
+  amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', nbsp: ' ', trade: '™', copy: '©',
+  reg: '®', hellip: '…', ndash: '–', mdash: '—', lsquo: '‘',
+  rsquo: '’', ldquo: '“', rdquo: '”',
+};
+const safeChar = (code, original) => (code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)
+  ? String.fromCodePoint(code) : original);
+
 const decode = (s) => s
-  .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'")
-  .replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+  .replace(/&#x([0-9a-f]+);/gi, (m, h) => safeChar(parseInt(h, 16), m))
+  .replace(/&#(\d+);/g, (m, d) => safeChar(parseInt(d, 10), m))
+  .replace(/&(amp|quot|apos|lt|gt|nbsp|trade|copy|reg|hellip|ndash|mdash|lsquo|rsquo|ldquo|rdquo);/g,
+    (m, n) => NAMED[n] ?? m);
 
 function meta(html, key) {
   const tag = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${key}["'][^>]*>`, 'i'));

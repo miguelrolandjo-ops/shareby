@@ -82,6 +82,7 @@ git config --global user.email "your.name@shopee.com"
 git config --global core.autocrlf input
 ```
 
+
 > The `core.autocrlf input` setting avoids Windows line-ending (CRLF) problems in shell scripts and Docker files.
 
 Installing Git for Windows also gives you **Git Bash**, which is useful if you want to run Linux-style commands.
