@@ -24,6 +24,7 @@ class Folder {
     required this.updatedAt,
     this.ownerId,
     this.myRole = 'owner',
+    this.sortOrder,
     this.deleted = false,
   });
 
@@ -40,6 +41,10 @@ class Folder {
   final String myRole;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  /// Position on Home (lower = earlier). Device-local, never synced; null = never moved,
+  /// so it goes after the ones that were.
+  final int? sortOrder;
   final bool deleted;
 
   bool get isUncategorized => id == kUncategorizedId;
@@ -62,6 +67,7 @@ class Folder {
     String? emoji,
     String? ownerId,
     String? myRole,
+    int? sortOrder,
     DateTime? updatedAt,
     bool? deleted,
   }) =>
@@ -73,6 +79,7 @@ class Folder {
         isShared: isShared,
         ownerId: ownerId ?? this.ownerId,
         myRole: myRole ?? this.myRole,
+        sortOrder: sortOrder ?? this.sortOrder,
         createdAt: createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
         deleted: deleted ?? this.deleted,
@@ -81,6 +88,7 @@ class Folder {
   Map<String, Object?> toDb({required bool dirty}) => {
         'id': id,
         'name': name,
+        'sort_order': sortOrder,
         'color': color,
         'emoji': emoji,
         'is_shared': isShared ? 1 : 0,
@@ -100,6 +108,7 @@ class Folder {
         isShared: m['is_shared'] == 1,
         ownerId: m['owner_id'] as String?,
         myRole: (m['my_role'] as String?) ?? 'owner',
+        sortOrder: m['sort_order'] as int?,
         createdAt: _parse(m['created_at']),
         updatedAt: _parse(m['updated_at']),
         deleted: m['deleted'] == 1,

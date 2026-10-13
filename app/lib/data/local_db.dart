@@ -33,7 +33,7 @@ class LocalDb {
   static Future<LocalDb> open({String name = 'shareby.db'}) async {
     final db = await openDatabase(
       p.join(await getDatabasesPath(), name),
-      version: 3,
+      version: 4,
       onCreate: _create,
       onUpgrade: _upgrade,
     );
@@ -51,6 +51,7 @@ class LocalDb {
           is_shared INTEGER NOT NULL DEFAULT 0,
           owner_id TEXT,
           my_role TEXT NOT NULL DEFAULT 'owner',
+          sort_order INTEGER,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           deleted INTEGER NOT NULL DEFAULT 0,
@@ -114,6 +115,10 @@ class LocalDb {
         ..execute('ALTER TABLE items ADD COLUMN completion_updated_at TEXT');
       await batch.commit(noResult: true);
     }
+    if (oldVersion < 4) {
+      // v4: manual folder order on Home (device-local)
+      await db.execute('ALTER TABLE folders ADD COLUMN sort_order INTEGER');
+    }
     if (oldVersion < 3) {
       // v3: manual ordering inside a folder (device-local)
       await db.execute('ALTER TABLE items ADD COLUMN sort_order INTEGER');
@@ -123,7 +128,8 @@ class LocalDb {
   // ---------------------------------------------------------------- reads
 
   Future<List<Folder>> folders() async {
-    final rows = await _db.query('folders', where: 'deleted = 0', orderBy: 'created_at ASC');
+    final rows = await _db.query('folders',
+        where: 'deleted = 0', orderBy: 'COALESCE(sort_order, 1000000) ASC, created_at ASC');
     return rows.map(Folder.fromDb).toList();
   }
 
@@ -169,6 +175,15 @@ class LocalDb {
   /// Device-local counter for the auto-confirm rule; intentionally not synced.
   Future<void> setViewCount(String itemId, int count) async {
     await _db.update('items', {'view_count': count}, where: 'id = ?', whereArgs: [itemId]);
+  }
+
+  /// Manual order of folders on Home: ids in display order. Device-local, never synced.
+  Future<void> setFolderSortOrders(List<String> idsInOrder) async {
+    await _db.transaction((txn) async {
+      for (var i = 0; i < idsInOrder.length; i++) {
+        await txn.update('folders', {'sort_order': i}, where: 'id = ?', whereArgs: [idsInOrder[i]]);
+      }
+    });
   }
 
   /// Manual order inside a folder: ids in display order. Device-local, never synced.
@@ -252,7 +267,10 @@ class LocalDb {
 
       for (final f in folders) {
         if (await dirty('folders', f.id)) continue; // our unpushed edit wins; it syncs next
-        await txn.insert('folders', f.toDb(dirty: false), conflictAlgorithm: ConflictAlgorithm.replace);
+        final order = await txn.query('folders', columns: ['sort_order'], where: 'id = ?', whereArgs: [f.id], limit: 1);
+        final keep = order.isEmpty ? null : order.first['sort_order'] as int?;
+        await txn.insert('folders', f.copyWith(sortOrder: keep).toDb(dirty: false),
+            conflictAlgorithm: ConflictAlgorithm.replace);
       }
 
       for (final i in items) {

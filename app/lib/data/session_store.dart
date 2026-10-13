@@ -21,6 +21,7 @@ class SessionStore {
   static const _sessionKey = 'session_v1';
   static const _cursorKey = 'pull_cursor_v1';
   static const _seededKey = 'seeded_v1';
+  static const _refactorUndoKey = 'refactor_undo_v1';
 
   final SharedPreferences _prefs;
   UserSession? _current;
@@ -46,6 +47,17 @@ class SessionStore {
       await _prefs.remove(_cursorKey);
     } else {
       await _prefs.setString(_cursorKey, cursor);
+    }
+  }
+
+  /// The last refactor's undo snapshot (JSON), kept for 24 hours. See [RefactorUndo].
+  String? get refactorUndoRaw => _prefs.getString(_refactorUndoKey);
+
+  Future<void> setRefactorUndoRaw(String? raw) async {
+    if (raw == null) {
+      await _prefs.remove(_refactorUndoKey);
+    } else {
+      await _prefs.setString(_refactorUndoKey, raw);
     }
   }
 

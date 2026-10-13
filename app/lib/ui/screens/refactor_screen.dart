@@ -4,12 +4,35 @@ import 'package:provider/provider.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../data/refactor_planner.dart';
+import '../../data/refactor_undo.dart';
 import '../../state/app_state.dart';
 import '../helpers.dart';
 
 /// Regroup every link into a new set of folders, in two steps:
 ///  1. Setup: optionally type some groups of your own first.
 ///  2. Review: a proposed grouping you can trim, group by group. Nothing changes until Apply.
+/// Takes back the last refactor and tells the user how it went. Used by the Undo button
+/// and by the snackbar's Undo action right after applying.
+Future<bool> undoLastRefactor(AppState state, ScaffoldMessengerState messenger) async {
+  try {
+    final n = await state.undoRefactor();
+    messenger
+        .showSnackBar(SnackBar(content: Text('Undone. $n ${n == 1 ? 'link is' : 'links are'} back where they were')));
+    return true;
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    return false;
+  }
+}
+
+String _ago(DateTime at) {
+  final d = DateTime.now().difference(at);
+  if (d.inMinutes < 1) return 'just now';
+  if (d.inMinutes < 60) return '${d.inMinutes} min ago';
+  final h = d.inHours;
+  return '$h ${h == 1 ? 'hour' : 'hours'} ago';
+}
+
 class RefactorScreen extends StatefulWidget {
   const RefactorScreen({super.key});
 
@@ -28,6 +51,7 @@ class _RefactorScreenState extends State<RefactorScreen> {
   final Set<String> _dropped = {};
   RefactorPlan? _plan;
   bool _applying = false;
+  bool _undoing = false;
 
   @override
   void dispose() {
@@ -74,7 +98,11 @@ class _RefactorScreenState extends State<RefactorScreen> {
     final navigator = Navigator.of(context);
     try {
       final moved = await state.applyRefactor(plan);
-      messenger.showSnackBar(SnackBar(content: Text('Regrouped $moved ${moved == 1 ? 'link' : 'links'}')));
+      messenger.showSnackBar(SnackBar(
+        content: Text('Regrouped $moved ${moved == 1 ? 'link' : 'links'}'),
+        duration: const Duration(seconds: 8),
+        action: SnackBarAction(label: 'Undo', onPressed: () => undoLastRefactor(state, messenger)),
+      ));
       navigator.pop();
     } catch (e) {
       if (!mounted) return;
@@ -101,12 +129,47 @@ class _RefactorScreenState extends State<RefactorScreen> {
     );
   }
 
+  Future<void> _undo() async {
+    final state = context.read<AppState>();
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _undoing = true);
+    await undoLastRefactor(state, messenger);
+    if (mounted) setState(() => _undoing = false);
+  }
+
+  Widget _undoCard(RefactorUndo undo) => Container(
+        margin: const EdgeInsets.only(top: 16),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.line),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Last refactor', style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          Text(
+            '${_ago(undo.at)} · ${undo.linkCount} ${undo.linkCount == 1 ? 'link' : 'links'} moved. '
+            'You can undo it for 24 hours.',
+            style: const TextStyle(color: AppColors.inkSoft, fontSize: 13, height: 1.35),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: _undoing ? null : _undo,
+            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
+            icon: const Icon(Icons.undo_rounded, size: 18),
+            label: Text(_undoing ? 'Undoing...' : 'Undo changes'),
+          ),
+        ]),
+      );
+
   // ------------------------------------------------------------------ setup
 
   Widget _setup(BuildContext context) {
     final state = context.watch<AppState>();
     final count = state.personalItems.length;
     final folders = state.personalFolders;
+    final undo = state.refactorUndo;
     final hasGroups = _seeds.isNotEmpty || folders.any((f) => !_dropped.contains(f.id));
     return ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 32), children: [
       Text(
@@ -115,6 +178,7 @@ class _RefactorScreenState extends State<RefactorScreen> {
             : 'Regroup all $count of your links into new folders. You review the result before anything changes.',
         style: const TextStyle(color: AppColors.inkSoft, height: 1.4),
       ),
+      if (undo != null) _undoCard(undo),
       if (folders.isNotEmpty) ...[
         const SizedBox(height: 20),
         const FieldLabel('Your current folders'),

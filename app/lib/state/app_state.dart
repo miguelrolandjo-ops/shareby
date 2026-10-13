@@ -8,6 +8,7 @@ import '../data/auth_service.dart';
 import '../data/local_db.dart';
 import '../data/models.dart';
 import '../data/refactor_planner.dart';
+import '../data/refactor_undo.dart';
 import '../data/repository.dart';
 import '../data/session_store.dart';
 import '../data/share_intake.dart';
@@ -282,6 +283,8 @@ class AppState extends ChangeNotifier {
 
   Future<void> deleteItems(List<Item> items) => _mutate(() => repo.deleteItems(items));
 
+  Future<void> setFolderOrder(List<String> idsInOrder) => _mutate(() => repo.setFolderOrder(idsInOrder));
+
   Future<void> setItemOrder(List<String> idsInOrder) => _mutate(() => repo.setItemOrder(idsInOrder));
 
   /// Every link in a personal folder or Uncategorized, for regrouping.
@@ -291,6 +294,11 @@ class AppState extends ChangeNotifier {
   }
 
   Future<int> applyRefactor(RefactorPlan plan) => _mutate(() => repo.applyRefactor(plan));
+
+  /// The last refactor, while it can still be undone (24 hours).
+  RefactorUndo? get refactorUndo => repo.refactorUndo;
+
+  Future<int> undoRefactor() => _mutate(repo.undoRefactor);
 
   Future<void> moveItem(Item item, String folderId) => _mutate(() => repo.moveItem(item, folderId));
 

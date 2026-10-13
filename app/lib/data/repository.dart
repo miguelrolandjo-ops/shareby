@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:uuid/uuid.dart';
 
 import '../core/config.dart';
@@ -7,6 +9,7 @@ import 'folder_namer.dart';
 import 'local_db.dart';
 import 'models.dart';
 import 'refactor_planner.dart';
+import 'refactor_undo.dart';
 import 'session_store.dart';
 import 'title_fetcher.dart';
 import 'url_utils.dart';
@@ -284,6 +287,9 @@ class Repository {
     }
   }
 
+  /// Manual order of the folders on Home (ids in display order). Stays on this device.
+  Future<void> setFolderOrder(List<String> idsInOrder) => db.setFolderSortOrders(idsInOrder);
+
   /// Manual order inside a folder (ids in display order). Stays on this device.
   Future<void> setItemOrder(List<String> idsInOrder) => db.setSortOrders(idsInOrder);
 
@@ -293,6 +299,9 @@ class Repository {
     final items = {for (final i in await db.items()) i.id: i};
     final folders = (await db.folders()).where((f) => !f.isShared && !f.deleted).toList();
     final touchedFolderIds = <String>{};
+    final before = <ItemBefore>[];
+    final createdIds = <String>[];
+    final removedIds = <String>[];
     var moved = 0;
     var colorIndex = 0;
 
@@ -307,9 +316,11 @@ class Repository {
               color: FolderPalette.all[colorIndex++ % FolderPalette.all.length],
               emoji: group.emoji,
             );
+      if (existing.isEmpty) createdIds.add(target.id);
       for (final item in members) {
         if (item.folderId == target.id) continue;
         if (item.folderId != null) touchedFolderIds.add(item.folderId!);
+        before.add(ItemBefore(id: item.id, folderId: item.folderId, status: item.status, tag: item.tag));
         await confirmItem(item, moveTo: target.id);
         moved++;
       }
@@ -320,9 +331,75 @@ class Repository {
     for (final f in folders) {
       if (touchedFolderIds.contains(f.id) && !remaining.any((i) => i.folderId == f.id)) {
         await _save(f.copyWith(deleted: true, updatedAt: _now()));
+        removedIds.add(f.id);
       }
     }
+    if (before.isNotEmpty || createdIds.isNotEmpty) {
+      await sessions.setRefactorUndoRaw(jsonEncode(RefactorUndo(
+        at: DateTime.now(),
+        items: before,
+        createdFolderIds: createdIds,
+        removedFolderIds: removedIds,
+      ).toJson()));
+    }
     return moved;
+  }
+
+  /// The last refactor, if it can still be undone (within 24 hours).
+  RefactorUndo? get refactorUndo {
+    final raw = sessions.refactorUndoRaw;
+    if (raw == null) return null;
+    try {
+      final undo = RefactorUndo.fromJson((jsonDecode(raw) as Map).cast<String, dynamic>());
+      if (!undo.isExpired()) return undo;
+    } catch (_) {
+      // A damaged snapshot is as good as none.
+    }
+    sessions.setRefactorUndoRaw(null);
+    return null;
+  }
+
+  /// Puts every link back where it was, brings back the folders the refactor removed and
+  /// removes the ones it created (links added to those since go to Uncategorized).
+  Future<int> undoRefactor() async {
+    final undo = refactorUndo;
+    if (undo == null) throw StateError('There is nothing to undo, or it was more than 24 hours ago.');
+    final now = _now();
+
+    for (final id in undo.removedFolderIds) {
+      final f = await db.folderById(id);
+      if (f != null && f.deleted) await _save(f.copyWith(deleted: false, updatedAt: now));
+    }
+
+    final live = {for (final f in await db.folders()) f.id};
+    final items = {for (final i in await db.items()) i.id: i};
+    var restored = 0;
+    for (final b in undo.items) {
+      final item = items[b.id];
+      if (item == null) continue; // deleted since
+      final home = (b.folderId != null && live.contains(b.folderId)) ? b.folderId : null;
+      await _saveItem(item.copyWith(
+        folderId: home,
+        clearFolder: home == null,
+        status: b.status,
+        tag: b.tag,
+        clearTag: b.tag == null,
+        updatedAt: now,
+      ));
+      restored++;
+    }
+
+    final stillInside = await db.items();
+    for (final id in undo.createdFolderIds) {
+      for (final item in stillInside.where((i) => i.folderId == id)) {
+        await _saveItem(item.copyWith(clearFolder: true, status: 'confirmed', updatedAt: now));
+      }
+      final f = await db.folderById(id);
+      if (f != null && !f.deleted) await _save(f.copyWith(deleted: true, updatedAt: now));
+    }
+
+    await sessions.setRefactorUndoRaw(null);
+    return restored;
   }
 
   /// Tags are a personal-folder feature; shared boards are curated together without them.

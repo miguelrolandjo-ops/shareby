@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -74,16 +76,164 @@ class HomeScreen extends StatelessWidget {
                   if (i == tiles.length + 1) return const _RefactorCard();
                   final f = tiles[i];
                   final inside = state.itemsIn(f.id);
-                  return FolderCard(
+                  final card = FolderCard(
                     folder: f,
                     count: inside.length,
                     newCount: inside.where((it) => it.isNew).length,
                     doneCount: inside.where((it) => it.isDone).length,
                     onTap: () => GroupDetailScreen.open(context, f.id),
                   );
+                  // Uncategorized is not a real folder: it can't be moved or edited.
+                  if (f.isUncategorized) return card;
+                  return MovableFolderTile(
+                    key: ValueKey(f.id),
+                    folder: f,
+                    onDrop: (dragged, target) => _moveFolder(state, dragged, target),
+                    onEdit: (folder) => showAddFolderSheet(context, editing: folder),
+                    child: card,
+                  );
                 },
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Drops [dragged] into [target]'s place and saves the new order of the folders.
+void _moveFolder(AppState state, Folder dragged, Folder target) {
+  final ids = [for (final f in state.personalFolders) f.id];
+  final from = ids.indexOf(dragged.id);
+  final to = ids.indexOf(target.id);
+  if (from < 0 || to < 0 || from == to) return;
+  ids.removeAt(from);
+  ids.insert(to, dragged.id);
+  state.setFolderOrder(ids);
+}
+
+/// A folder on Home that responds to touch-and-hold:
+///  * hold, then let go without moving: opens the folder's Edit sheet;
+///  * hold, then drag more than [slop] pixels: picks the folder up so it can be dropped
+///    on another folder to take its place (no Edit sheet when it is dropped).
+/// The page scrolls by itself when a held folder is dragged near the top or bottom.
+class MovableFolderTile extends StatefulWidget {
+  const MovableFolderTile({
+    super.key,
+    required this.folder,
+    required this.child,
+    required this.onDrop,
+    required this.onEdit,
+  });
+
+  final Folder folder;
+  final Widget child;
+  final void Function(Folder dragged, Folder target) onDrop;
+
+  /// Called when the folder is held and let go without being dragged.
+  final void Function(Folder folder) onEdit;
+
+  @override
+  State<MovableFolderTile> createState() => MovableFolderTileState();
+}
+
+class MovableFolderTileState extends State<MovableFolderTile> {
+  /// Android's touch slop: a finger can wobble this far and still count as holding still.
+  static const slop = 8.0;
+
+  Offset? _down;
+  Offset _last = Offset.zero;
+  bool _moved = false;
+  Timer? _scroller;
+
+  @override
+  void dispose() {
+    _scroller?.cancel();
+    super.dispose();
+  }
+
+  /// The page's own scroll view: the first scrollable above the folder grid (which doesn't scroll).
+  ScrollPosition? _pageScroll() {
+    final grid = context.findAncestorStateOfType<ScrollableState>();
+    final page = grid?.context.findAncestorStateOfType<ScrollableState>();
+    return (page ?? grid)?.position;
+  }
+
+  void _startAutoScroll() {
+    _scroller?.cancel();
+    _scroller = Timer.periodic(const Duration(milliseconds: 16), (_) {
+      final position = _pageScroll();
+      if (position == null || !mounted) return;
+      final view = MediaQuery.of(context);
+      final top = view.padding.top + 100;
+      final bottom = view.size.height - 150;
+      var step = 0.0;
+      if (_last.dy < top) {
+        step = -10;
+      } else if (_last.dy > bottom) {
+        step = 10;
+      }
+      if (step != 0) {
+        position.jumpTo((position.pixels + step).clamp(position.minScrollExtent, position.maxScrollExtent));
+      }
+    });
+  }
+
+  void _stopAutoScroll() {
+    _scroller?.cancel();
+    _scroller = null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final folder = widget.folder;
+    return DragTarget<Folder>(
+      onWillAcceptWithDetails: (d) => d.data.id != folder.id,
+      onAcceptWithDetails: (d) => widget.onDrop(d.data, folder),
+      builder: (context, candidates, _) => LayoutBuilder(
+        builder: (context, box) => Listener(
+          onPointerDown: (e) => _down = e.position,
+          child: LongPressDraggable<Folder>(
+            data: folder,
+            hapticFeedbackOnStart: true,
+            onDragStarted: () {
+              _moved = false;
+              _last = _down ?? Offset.zero;
+              _startAutoScroll();
+            },
+            onDragUpdate: (d) {
+              _last = d.globalPosition;
+              if (!_moved && _down != null && (d.globalPosition - _down!).distance > slop) _moved = true;
+            },
+            onDragEnd: (_) {
+              _stopAutoScroll();
+              if (!_moved && mounted) widget.onEdit(folder);
+            },
+            onDraggableCanceled: (_, __) => _stopAutoScroll(),
+            feedback: SizedBox(
+              width: box.maxWidth,
+              height: box.maxHeight,
+              child: Transform.scale(
+                scale: 1.05,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(18),
+                    boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 18, offset: Offset(0, 8))],
+                  ),
+                  child: Material(color: Colors.transparent, child: widget.child),
+                ),
+              ),
+            ),
+            childWhenDragging: Opacity(opacity: 0.3, child: widget.child),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: candidates.isEmpty ? Colors.transparent : AppColors.brand, width: 2),
+              ),
+              child: widget.child,
+            ),
           ),
         ),
       ),
@@ -115,8 +265,7 @@ class _Header extends StatelessWidget {
           ),
           child: name == null
               ? const Icon(Icons.person_rounded, color: Colors.white)
-              : Text(name.substring(0, 1).toUpperCase(),
-                  style: headStyle(20, color: Colors.white)),
+              : Text(name.substring(0, 1).toUpperCase(), style: headStyle(20, color: Colors.white)),
         ),
       ),
       const SizedBox(width: 12),
@@ -125,7 +274,9 @@ class _Header extends StatelessWidget {
           Text(name == null ? 'Hi there' : 'Hi, ${name.split(' ').first}', style: headStyle(22)),
           const SizedBox(height: 2),
           Text(
-            waiting == 0 ? 'All caught up' : (waiting == 1 ? '1 save needs a quick look' : '$waiting saves need a quick look'),
+            waiting == 0
+                ? 'All caught up'
+                : (waiting == 1 ? '1 save needs a quick look' : '$waiting saves need a quick look'),
             style: const TextStyle(color: AppColors.inkSoft, fontSize: 13),
           ),
         ]),
