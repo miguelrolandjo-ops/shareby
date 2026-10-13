@@ -90,10 +90,10 @@ class SyncService {
   }
 
   /// Fills in card thumbnails (and better titles) from Open Graph tags, a few per sync.
-  /// Stores '' when nothing is found so the lookup isn't repeated.
+  /// Marks the link fetched, with '' when nothing is found so the lookup isn't repeated.
   Future<void> _resolvePreviews() async {
     final pending = (await db.items())
-        .where((i) => i.thumbnailUrl == null && i.source != 'youtube')
+        .where((i) => !i.fetched && i.source != 'youtube')
         // Only your own saves: the server won't accept edits to a friend's pin.
         .where((i) => i.addedBy == null || i.addedBy == sessions.current?.userId)
         .take(5)
@@ -111,7 +111,7 @@ class SyncService {
         // Unpreviewable link: keep the placeholder.
       }
       await db.saveItem(
-        item.copyWith(thumbnailUrl: image, title: title, updatedAt: DateTime.now().toUtc()),
+        item.copyWith(thumbnailUrl: image, title: title, fetched: true, updatedAt: DateTime.now().toUtc()),
         enqueueOpId: _uuid.v4(),
       );
     }

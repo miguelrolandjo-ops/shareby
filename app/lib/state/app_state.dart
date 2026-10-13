@@ -133,26 +133,42 @@ class AppState extends ChangeNotifier {
   Future<void> refresh() async {
     await _ingestShares();
     await reload();
-    await _backfillPreviews();
+    await _backfillPreviews(force: true);
     await syncNow();
   }
 
-  bool _backfilling = false;
-  final Set<String> _previewTried = {};
+  Future<void>? _backfillRun;
 
-  /// Instagram, TikTok and other links get their thumbnail (and real title) looked up on-device.
-  Future<void> _backfillPreviews() async {
-    if (_backfilling) return;
-    _backfilling = true;
+  /// When each link was last tried, so the background timer doesn't hammer unreachable ones.
+  final Map<String, DateTime> _lastTried = {};
+  static const _retryAfter = Duration(minutes: 5);
+
+  /// Looks up every link that is not fetched yet (see [Item.fetched]). The user's own actions
+  /// ([force]: pull to refresh, opening the app, saving) retry everything at once; the
+  /// background timer waits a few minutes between tries of the same link.
+  Future<void> _backfillPreviews({bool force = false}) => _backfillRun ??= _runBackfill(force).whenComplete(() {
+        _backfillRun = null;
+      });
+
+  Future<void> _runBackfill(bool force) async {
+    final now = DateTime.now();
+    final skip = <String>{
+      if (!force)
+        for (final e in _lastTried.entries)
+          if (now.difference(e.value) < _retryAfter) e.key,
+    };
+    final before = {...skip};
     try {
-      while (await repo.backfillPreviews(_previewTried) > 0) {
+      while (await repo.backfillPreviews(skip) > 0) {
         await reload();
         _scheduleSync();
       }
     } catch (_) {
       // Previews are a nicety; never let a lookup problem surface to the user.
     } finally {
-      _backfilling = false;
+      for (final id in skip.difference(before)) {
+        _lastTried[id] = now;
+      }
     }
   }
 
@@ -160,6 +176,7 @@ class AppState extends ChangeNotifier {
   Future<void> onResumed() async {
     await _countImpressions();
     await reload();
+    unawaited(_backfillPreviews(force: true)); // e.g. links saved in airplane mode
     // Shared links are saved (and their titles looked up) in the background, so the app
     // opens instantly; the list updates itself when they land.
     unawaited(_tick());
@@ -187,7 +204,7 @@ class AppState extends ChangeNotifier {
     if (saved > 0) {
       _flashes.add(saved == 1 ? 'Saved 1 link from another app' : 'Saved $saved links from other apps');
       _scheduleSync();
-      unawaited(_backfillPreviews());
+      unawaited(_backfillPreviews(force: true));
     }
   }
 
@@ -271,7 +288,7 @@ class AppState extends ChangeNotifier {
 
   Future<Item> addLink({required String url, String? title, String? folderId}) async {
     final item = await _mutate(() => repo.addLink(url: url, title: title, folderId: folderId));
-    unawaited(_backfillPreviews());
+    unawaited(_backfillPreviews(force: true));
     return item;
   }
 

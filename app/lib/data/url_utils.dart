@@ -46,9 +46,26 @@ String? youtubeThumbnail(String url) {
 }
 
 const _namedEntities = {
-  'amp': '&', 'lt': '<', 'gt': '>', 'quot': '"', 'apos': "'", 'nbsp': ' ', 'trade': '™',
-  'copy': '©', 'reg': '®', 'hellip': '…', 'ndash': '–', 'mdash': '—', 'lsquo': '‘', 'rsquo': '’',
-  'ldquo': '“', 'rdquo': '”', 'bull': '•', 'middot': '·', 'deg': '°', 'hearts': '♥',
+  'amp': '&',
+  'lt': '<',
+  'gt': '>',
+  'quot': '"',
+  'apos': "'",
+  'nbsp': ' ',
+  'trade': '™',
+  'copy': '©',
+  'reg': '®',
+  'hellip': '…',
+  'ndash': '–',
+  'mdash': '—',
+  'lsquo': '‘',
+  'rsquo': '’',
+  'ldquo': '“',
+  'rdquo': '”',
+  'bull': '•',
+  'middot': '·',
+  'deg': '°',
+  'hearts': '♥',
 };
 
 final _entity = RegExp(r'&(?:#[xX]([0-9a-fA-F]+)|#([0-9]+)|([a-zA-Z][a-zA-Z0-9]*));');

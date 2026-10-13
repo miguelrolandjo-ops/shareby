@@ -33,7 +33,7 @@ class LocalDb {
   static Future<LocalDb> open({String name = 'shareby.db'}) async {
     final db = await openDatabase(
       p.join(await getDatabasesPath(), name),
-      version: 4,
+      version: 5,
       onCreate: _create,
       onUpgrade: _upgrade,
     );
@@ -71,6 +71,7 @@ class LocalDb {
           confidence REAL NOT NULL DEFAULT 0,
           view_count INTEGER NOT NULL DEFAULT 0,
           sort_order INTEGER,
+          fetched INTEGER NOT NULL DEFAULT 0,
           added_by TEXT,
           added_by_name TEXT,
           completed_at TEXT,
@@ -115,6 +116,14 @@ class LocalDb {
         ..execute('ALTER TABLE items ADD COLUMN completion_updated_at TEXT');
       await batch.commit(noResult: true);
     }
+    if (oldVersion < 5) {
+      // v5: `fetched` = the link's page was looked up. Links that already have a thumbnail
+      // answer and a real title count as fetched; the rest will be retried on refresh.
+      final batch = db.batch()
+        ..execute('ALTER TABLE items ADD COLUMN fetched INTEGER NOT NULL DEFAULT 0')
+        ..execute("UPDATE items SET fetched = 1 WHERE thumbnail_url IS NOT NULL AND title NOT LIKE 'Saved from %'");
+      await batch.commit(noResult: true);
+    }
     if (oldVersion < 4) {
       // v4: manual folder order on Home (device-local)
       await db.execute('ALTER TABLE folders ADD COLUMN sort_order INTEGER');
@@ -128,8 +137,8 @@ class LocalDb {
   // ---------------------------------------------------------------- reads
 
   Future<List<Folder>> folders() async {
-    final rows = await _db.query('folders',
-        where: 'deleted = 0', orderBy: 'COALESCE(sort_order, 1000000) ASC, created_at ASC');
+    final rows =
+        await _db.query('folders', where: 'deleted = 0', orderBy: 'COALESCE(sort_order, 1000000) ASC, created_at ASC');
     return rows.map(Folder.fromDb).toList();
   }
 
@@ -158,16 +167,14 @@ class LocalDb {
   /// Saves a folder. Pass [enqueueOpId] (only when signed in) to queue it for sync.
   Future<void> saveFolder(Folder f, {String? enqueueOpId}) async {
     await _db.transaction((txn) async {
-      await txn.insert('folders', f.toDb(dirty: enqueueOpId != null),
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('folders', f.toDb(dirty: enqueueOpId != null), conflictAlgorithm: ConflictAlgorithm.replace);
       if (enqueueOpId != null) await _enqueue(txn, enqueueOpId, 'folder', f.id, f.toApi());
     });
   }
 
   Future<void> saveItem(Item i, {String? enqueueOpId}) async {
     await _db.transaction((txn) async {
-      await txn.insert('items', i.toDb(dirty: enqueueOpId != null),
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.insert('items', i.toDb(dirty: enqueueOpId != null), conflictAlgorithm: ConflictAlgorithm.replace);
       if (enqueueOpId != null) await _enqueue(txn, enqueueOpId, 'item', i.id, i.toApi());
     });
   }
@@ -230,8 +237,7 @@ class LocalDb {
         .toList();
   }
 
-  Future<int> pendingCount() async =>
-      Sqflite.firstIntValue(await _db.rawQuery('SELECT COUNT(*) FROM outbox')) ?? 0;
+  Future<int> pendingCount() async => Sqflite.firstIntValue(await _db.rawQuery('SELECT COUNT(*) FROM outbox')) ?? 0;
 
   /// Removes pushed ops and clears `dirty` — unless the record was edited again
   /// while the push was in flight (then a newer op is still queued).
@@ -275,11 +281,13 @@ class LocalDb {
 
       for (final i in items) {
         final existing = await txn.query('items',
-            columns: ['dirty', 'view_count', 'sort_order'], where: 'id = ?', whereArgs: [i.id], limit: 1);
+            columns: ['dirty', 'view_count', 'sort_order', 'fetched'], where: 'id = ?', whereArgs: [i.id], limit: 1);
         if (existing.isNotEmpty && existing.first['dirty'] == 1) continue;
         final views = existing.isEmpty ? 0 : (existing.first['view_count'] as int? ?? 0);
         final order = existing.isEmpty ? null : existing.first['sort_order'] as int?;
-        await txn.insert('items', i.copyWith(viewCount: views, sortOrder: order).toDb(dirty: false),
+        // Looked up on this device, or the server already filled in the thumbnail.
+        final fetched = (existing.isNotEmpty && existing.first['fetched'] == 1) || i.thumbnailUrl != null;
+        await txn.insert('items', i.copyWith(viewCount: views, sortOrder: order, fetched: fetched).toDb(dirty: false),
             conflictAlgorithm: ConflictAlgorithm.replace);
       }
 

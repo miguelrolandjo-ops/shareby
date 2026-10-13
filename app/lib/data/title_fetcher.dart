@@ -6,10 +6,14 @@ import 'url_utils.dart';
 
 /// What a link's page says about itself.
 class PagePreview {
-  const PagePreview({this.title, this.image});
+  const PagePreview({this.title, this.image, this.reached = false});
 
   final String? title;
   final String? image;
+
+  /// The site gave a final answer (even "no title, no image"). false = nothing came back
+  /// (offline, timeout, server error), so the lookup should be tried again later.
+  final bool reached;
 
   bool get isEmpty => title == null && image == null;
 }
@@ -69,7 +73,9 @@ Future<PagePreview> fetchPagePreview(String url, {Duration timeout = const Durat
           : 'Mozilla/5.0 (Linux; Android 14) Shareby',
       'Accept-Language': 'en,id;q=0.8',
     }).timeout(timeout);
-    if (res.statusCode >= 400) return const PagePreview();
+    // 5xx and 429 are temporary: try again later. Other errors (404, login wall) are final.
+    final final_ = res.statusCode < 500 && res.statusCode != 429;
+    if (res.statusCode >= 400) return PagePreview(reached: final_);
     // Tags live in <head>; skip decoding the rest of a large page.
     final bytes = res.bodyBytes.length > 131072 ? res.bodyBytes.sublist(0, 131072) : res.bodyBytes;
     final html = utf8.decode(bytes, allowMalformed: true);
@@ -86,7 +92,7 @@ Future<PagePreview> fetchPagePreview(String url, {Duration timeout = const Durat
     }
     final title = _usableTitle(ogTitle) ?? _usableTitle(_titleTag.firstMatch(html)?.group(1));
     final image = _clean(ogImage ?? twitterImage);
-    return PagePreview(title: title, image: image != null && image.startsWith('http') ? image : null);
+    return PagePreview(title: title, image: image != null && image.startsWith('http') ? image : null, reached: true);
   } catch (_) {
     return const PagePreview();
   }
@@ -94,13 +100,11 @@ Future<PagePreview> fetchPagePreview(String url, {Duration timeout = const Durat
 
 Future<PagePreview> _tiktokOembed(String url, Duration timeout) async {
   try {
-    final res = await http
-        .get(Uri.https('www.tiktok.com', '/oembed', {'url': url}))
-        .timeout(timeout);
+    final res = await http.get(Uri.https('www.tiktok.com', '/oembed', {'url': url})).timeout(timeout);
     if (res.statusCode != 200) return const PagePreview();
     final j = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     final image = _clean(j['thumbnail_url'] as String?);
-    return PagePreview(title: _usableTitle(j['title'] as String?), image: image);
+    return PagePreview(title: _usableTitle(j['title'] as String?), image: image, reached: true);
   } catch (_) {
     return const PagePreview();
   }

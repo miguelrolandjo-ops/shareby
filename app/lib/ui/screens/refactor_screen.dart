@@ -308,6 +308,25 @@ class _RefactorScreenState extends State<RefactorScreen> {
     ]);
   }
 
+  /// Where a group came from, at a glance: orange-yellow = a folder you already have,
+  /// green = proposed by Shareby, blue = typed by you.
+  Widget _originTag(RefactorGroup g) {
+    final (String label, Color bg, Color fg) = g.existing
+        ? ('Current folder', AppColors.amberSoft, AppColors.amberInk)
+        : g.fromUser
+            ? (
+                'Yours',
+                FolderPalette.soft(const Color(FolderPalette.sky)),
+                FolderPalette.deep(const Color(FolderPalette.sky))
+              )
+            : ('Proposed', AppColors.brandSoft, AppColors.brand);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+      child: Text(label, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: fg)),
+    );
+  }
+
   Widget _groupCard(RefactorGroup g, Map<String, Item> items) {
     final titles = [
       for (final id in g.itemIds)
@@ -327,9 +346,13 @@ class _RefactorScreenState extends State<RefactorScreen> {
           collapsedShape: const Border(),
           leading: Text(g.emoji, style: const TextStyle(fontSize: 22)),
           title: Text(g.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-          subtitle: Text(
-            '${titles.length} ${titles.length == 1 ? 'link' : 'links'}${g.existing ? ' · current folder' : g.fromUser ? ' · yours' : ' · proposed'}',
-            style: const TextStyle(fontSize: 12.5),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Row(children: [
+              Text('${titles.length} ${titles.length == 1 ? 'link' : 'links'}', style: const TextStyle(fontSize: 12.5)),
+              const SizedBox(width: 8),
+              _originTag(g),
+            ]),
           ),
           trailing: IconButton(
             tooltip: 'Remove group',

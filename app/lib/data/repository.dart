@@ -85,16 +85,14 @@ class Repository {
       return folders.firstWhere((f) => f.id == proposal.existingId);
     }
     final used = folders.map((f) => f.color).toSet();
-    final color = FolderPalette.all.firstWhere((c) => !used.contains(c), orElse: () => FolderPalette.all[folders.length % FolderPalette.all.length]);
+    final color = FolderPalette.all.firstWhere((c) => !used.contains(c),
+        orElse: () => FolderPalette.all[folders.length % FolderPalette.all.length]);
     return createFolder(name: proposal.name, color: color, emoji: proposal.emoji);
   }
 
   /// Duplicate names are allowed; the copy gets " (2)", " (3)"... to tell them apart.
   Future<String> _uniqueName(String name, {required bool shared}) async {
-    final taken = (await db.folders())
-        .where((f) => f.isShared == shared)
-        .map((f) => f.name.toLowerCase())
-        .toSet();
+    final taken = (await db.folders()).where((f) => f.isShared == shared).map((f) => f.name.toLowerCase()).toSet();
     if (!taken.contains(name.toLowerCase())) return name;
     var n = 2;
     while (taken.contains('${name.toLowerCase()} ($n)')) {
@@ -136,6 +134,7 @@ class Repository {
     String? suggested;
     var confidence = 0.0;
     String? previewImage;
+    var fetchedNow = false;
 
     if (folderId == null) {
       // A bare link ("Saved from instagram.com") gives the categorizer nothing to
@@ -144,6 +143,7 @@ class Repository {
         final preview = await fetchPagePreview(url);
         if (preview.title != null) cleanTitle = preview.title!;
         previewImage = preview.image;
+        fetchedNow = preview.reached;
       }
       final suggestion = await suggestFor('$cleanTitle $url');
       target = suggestion.folderId;
@@ -163,7 +163,8 @@ class Repository {
       url: url,
       title: cleanTitle,
       source: detectSource(url),
-      thumbnailUrl: youtubeThumbnail(url) ?? previewImage,
+      thumbnailUrl: youtubeThumbnail(url) ?? previewImage ?? (fetchedNow ? '' : null),
+      fetched: fetchedNow,
       status: status,
       suggestedFolderId: suggested,
       confidence: confidence,
@@ -176,35 +177,40 @@ class Repository {
     return item;
   }
 
-  /// Fills in the thumbnail (and a real title, where the link only had a placeholder) for
-  /// saves that have none yet: Instagram, TikTok and other links. Personal saves only, since
-  /// edits to a shared board you can only view would be rejected. [tried] keeps failed
-  /// lookups from being retried over and over in one session. Returns how many changed.
-  Future<int> backfillPreviews(Set<String> tried, {int limit = 6}) async {
-    final shared = {for (final f in await db.folders()) if (f.isShared) f.id};
+  /// Looks up every link that is not [Item.fetched] yet: the page's real title (where the
+  /// link only had a placeholder) and its thumbnail. A link is marked fetched only when the
+  /// site answered, so ones saved offline stay unfetched and are retried next time.
+  /// Personal saves only: edits to a board you can only view would be rejected.
+  ///
+  /// [skip] holds links not to try (recently tried); each link tried is added to it, so one
+  /// run never repeats itself. Returns how many links were tried (0 = nothing left to do).
+  Future<int> backfillPreviews(Set<String> skip, {int limit = 6}) async {
+    final shared = {
+      for (final f in await db.folders())
+        if (f.isShared) f.id
+    };
     final todo = (await db.items())
-        .where((i) => i.thumbnailUrl == null && !tried.contains(i.id) && !shared.contains(i.folderId))
+        .where((i) => !i.fetched && !skip.contains(i.id) && !shared.contains(i.folderId))
         .take(limit)
         .toList();
-    var changed = 0;
-    for (final item in todo) {
-      tried.add(item.id);
-      final derived = youtubeThumbnail(item.url);
-      final preview = derived == null ? await fetchPagePreview(item.url) : const PagePreview();
-      final image = derived ?? preview.image;
-      final betterTitle = isFallbackTitle(item.title) ? preview.title : null;
-      if (image == null && betterTitle == null && preview.isEmpty) continue; // unreachable: try next time
+    skip.addAll(todo.map((i) => i.id));
+    final previews = await Future.wait([for (final item in todo) fetchPagePreview(item.url)]);
+    for (var n = 0; n < todo.length; n++) {
+      final item = todo[n];
+      final preview = previews[n];
+      if (!preview.reached) continue; // offline or temporarily down: leave it for next time
+      final hasThumb = item.thumbnailUrl != null && item.thumbnailUrl!.isNotEmpty;
       await _saveItem(item.copyWith(
-        thumbnailUrl: image ?? '', // '' = looked up, nothing to show
-        title: betterTitle,
+        fetched: true,
+        thumbnailUrl: hasThumb ? null : (youtubeThumbnail(item.url) ?? preview.image ?? ''),
+        title: isFallbackTitle(item.title) ? preview.title : null,
         updatedAt: _now(),
       ));
-      changed++;
     }
-    return changed;
+    return todo.length;
   }
 
-/// Uncategorized "Refactor": tries every link there against your folders once more.
+  /// Uncategorized "Refactor": tries every link there against your folders once more.
   ///  * a match becomes a [New] suggestion, like any fresh save, so you can confirm it;
   ///  * no match stays in Uncategorized and is marked confirmed, so it raises no "new item"
   ///    notification again.
@@ -216,7 +222,8 @@ class Repository {
     for (var start = 0; start < stuck.length; start += 4) {
       final batch = stuck.skip(start).take(4).toList();
       final previews = await Future.wait([
-        for (final item in batch) isFallbackTitle(item.title) ? fetchPagePreview(item.url) : Future.value(const PagePreview()),
+        for (final item in batch)
+          isFallbackTitle(item.title) ? fetchPagePreview(item.url) : Future.value(const PagePreview()),
       ]);
       for (var i = 0; i < batch.length; i++) {
         final item = batch[i];
@@ -228,6 +235,7 @@ class Repository {
         await _saveItem(item.copyWith(
           title: preview.title,
           thumbnailUrl: item.thumbnailUrl == null ? preview.image : null,
+          fetched: preview.reached ? true : null,
           folderId: suggestion.folderId,
           suggestedFolderId: suggestion.folderId,
           confidence: suggestion.confidence,
@@ -249,11 +257,7 @@ class Repository {
         CategoryCandidate(
           id: f.id,
           name: f.name,
-          examples: items
-              .where((i) => i.folderId == f.id && !i.isNew)
-              .take(25)
-              .map((i) => i.title)
-              .toList(),
+          examples: items.where((i) => i.folderId == f.id && !i.isNew).take(25).map((i) => i.title).toList(),
         ),
     ];
     return categorizer.suggest(text, candidates);
@@ -306,7 +310,10 @@ class Repository {
     var colorIndex = 0;
 
     for (final group in plan.groups) {
-      final members = [for (final id in group.itemIds) if (items[id] != null) items[id]!];
+      final members = [
+        for (final id in group.itemIds)
+          if (items[id] != null) items[id]!
+      ];
       if (members.isEmpty) continue;
       final existing = folders.where((f) => f.name.toLowerCase() == group.name.toLowerCase());
       final Folder target = existing.isNotEmpty
@@ -454,6 +461,7 @@ class Repository {
       confidence: current.confidence,
       viewCount: current.viewCount,
       sortOrder: current.sortOrder,
+      fetched: current.fetched,
       addedBy: current.addedBy,
       addedByName: current.addedByName,
       completedAt: previous.completedAt,
@@ -515,8 +523,8 @@ class Repository {
 
     Future<Folder> folder(String name, int color, String emoji) async {
       final t = at();
-      final f = Folder(id: _uuid.v4(), name: name, color: color, emoji: emoji, isShared: false,
-          createdAt: t, updatedAt: t);
+      final f =
+          Folder(id: _uuid.v4(), name: name, color: color, emoji: emoji, isShared: false, createdAt: t, updatedAt: t);
       await db.saveFolder(f);
       return f;
     }
@@ -549,20 +557,28 @@ class Repository {
     final cafe = await folder('Cafe Picks', FolderPalette.coral, '☕');
     final sports = await folder('Sports Vibe', FolderPalette.lilac, '🏀');
 
-    await link(cooking, 'Resep nasi goreng cuma butuh 3 bahan', 'https://www.instagram.com/reel/shareby-demo-1', tag: 'Jumat gas');
-    await link(cooking, 'Cheesecake no-bake yang lumer di mulut', 'https://www.tiktok.com/@shareby/video/1001', tag: 'Dessert');
+    await link(cooking, 'Resep nasi goreng cuma butuh 3 bahan', 'https://www.instagram.com/reel/shareby-demo-1',
+        tag: 'Jumat gas');
+    await link(cooking, 'Cheesecake no-bake yang lumer di mulut', 'https://www.tiktok.com/@shareby/video/1001',
+        tag: 'Dessert');
     await link(cooking, 'Cara bikin bumbu rendang tahan lama', 'https://www.instagram.com/reel/shareby-demo-2');
-    await link(jakarta, 'Rooftop bar Senopati buat nongkrong malam', 'https://www.instagram.com/p/shareby-demo-3', done: true);
-    await link(jakarta, 'Itinerary sehari muter Kota Tua', 'https://www.youtube.com/watch?v=shareby0001', tag: 'Day trip');
-    await link(bali, 'Sunrise trek Gunung Batur worth it banget', 'https://www.youtube.com/watch?v=shareby0002', tag: 'Must do');
+    await link(jakarta, 'Rooftop bar Senopati buat nongkrong malam', 'https://www.instagram.com/p/shareby-demo-3',
+        done: true);
+    await link(jakarta, 'Itinerary sehari muter Kota Tua', 'https://www.youtube.com/watch?v=shareby0001',
+        tag: 'Day trip');
+    await link(bali, 'Sunrise trek Gunung Batur worth it banget', 'https://www.youtube.com/watch?v=shareby0002',
+        tag: 'Must do');
     await link(bali, 'Warung lokal murah enak di Canggu', 'https://www.instagram.com/reel/shareby-demo-4');
-    await link(cafe, 'Kopi susu terenak murah di Kemang', 'https://www.instagram.com/reel/shareby-demo-5', tag: 'Under 25rb');
+    await link(cafe, 'Kopi susu terenak murah di Kemang', 'https://www.instagram.com/reel/shareby-demo-5',
+        tag: 'Under 25rb');
     await link(sports, 'Home workout 15 menit tanpa alat', 'https://www.instagram.com/reel/shareby-demo-6');
 
     // Waiting in "Needs a quick look", as in the prototype.
-    await link(cooking, 'Ayam geprek sambel korek pedas nampol', 'https://www.youtube.com/watch?v=shareby0003', isNew: true);
+    await link(cooking, 'Ayam geprek sambel korek pedas nampol', 'https://www.youtube.com/watch?v=shareby0003',
+        isNew: true);
     await link(cafe, 'Dessert box viral yang wajib dicoba', 'https://www.tiktok.com/@shareby/video/1002', isNew: true);
-    await link(jakarta, 'Spot foto golden hour di GBK', 'https://www.tiktok.com/@shareby/video/1003', isNew: true, views: 1);
+    await link(jakarta, 'Spot foto golden hour di GBK', 'https://www.tiktok.com/@shareby/video/1003',
+        isNew: true, views: 1);
 
     await sessions.markSeeded();
   }

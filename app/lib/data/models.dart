@@ -161,6 +161,7 @@ class Item {
     this.completedByName,
     this.completionUpdatedAt,
     this.sortOrder,
+    this.fetched = false,
     this.deleted = false,
   });
 
@@ -204,6 +205,11 @@ class Item {
   /// Manual position inside a folder (lower = earlier). Device-local like [viewCount];
   /// null = never reordered, so it shows first, newest first.
   final int? sortOrder;
+
+  /// true once the link's page was looked up successfully (real title and thumbnail, or
+  /// confirmed to have none). false = not yet, e.g. saved offline: pull-to-refresh retries it.
+  /// Device-local, never synced.
+  final bool fetched;
   final bool deleted;
 
   bool get isNew => status == 'new';
@@ -221,6 +227,7 @@ class Item {
     String? suggestedFolderId,
     double? confidence,
     int? sortOrder,
+    bool? fetched,
     DateTime? updatedAt,
     bool? deleted,
     DateTime? completedAt,
@@ -248,6 +255,7 @@ class Item {
         completedByName: clearCompleted ? null : (completedByName ?? this.completedByName),
         completionUpdatedAt: completionUpdatedAt ?? this.completionUpdatedAt,
         sortOrder: sortOrder ?? this.sortOrder,
+        fetched: fetched ?? this.fetched,
         createdAt: createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
         deleted: deleted ?? this.deleted,
@@ -266,6 +274,7 @@ class Item {
         'confidence': confidence,
         'view_count': viewCount,
         'sort_order': sortOrder,
+        'fetched': fetched ? 1 : 0,
         'added_by': addedBy,
         'added_by_name': addedByName,
         'completed_at': _isoOrNull(completedAt),
@@ -291,6 +300,7 @@ class Item {
         confidence: (m['confidence'] as num?)?.toDouble() ?? 0,
         viewCount: (m['view_count'] as int?) ?? 0,
         sortOrder: m['sort_order'] as int?,
+        fetched: m['fetched'] == 1,
         addedBy: m['added_by'] as String?,
         addedByName: m['added_by_name'] as String?,
         completedAt: _parseOrNull(m['completed_at']),
