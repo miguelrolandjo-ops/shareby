@@ -3,13 +3,35 @@ import 'package:provider/provider.dart';
 
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../data/platforms.dart';
 import '../../state/app_state.dart';
 import '../helpers.dart';
 import '../sheets/confirm_item_sheet.dart';
 import '../sheets/item_actions_sheet.dart';
+import '../sheets/item_detail_dialog.dart';
 import '../widgets/item_tiles.dart';
 
+enum _Sort { newest, oldest, title, mostViewed }
+
+enum _DateRange { any, today, week, month, year }
+
+const _sortLabels = {
+  _Sort.newest: 'Newest first',
+  _Sort.oldest: 'Oldest first',
+  _Sort.title: 'Title A–Z',
+  _Sort.mostViewed: 'Most viewed',
+};
+
+const _dateLabels = {
+  _DateRange.any: 'Any time',
+  _DateRange.today: 'Today',
+  _DateRange.week: 'Past 7 days',
+  _DateRange.month: 'Past 30 days',
+  _DateRange.year: 'Past year',
+};
+
 /// Searches titles, links, tags and folder names on the device, so it works offline.
+/// With no query or filter it lists every link, newest first, as a grid.
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
 
@@ -19,6 +41,11 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _query = TextEditingController();
+  bool _pinnedOnly = false;
+  bool _grid = true;
+  _Sort _sort = _Sort.newest;
+  _DateRange _date = _DateRange.any;
+  Set<String> _sources = {};
 
   @override
   void dispose() {
@@ -26,20 +53,137 @@ class _SearchScreenState extends State<SearchScreen> {
     super.dispose();
   }
 
+  int get _filterCount => (_date == _DateRange.any ? 0 : 1) + (_sources.isEmpty ? 0 : 1);
+
+  DateTime? _since() {
+    final now = DateTime.now();
+    return switch (_date) {
+      _DateRange.any => null,
+      _DateRange.today => DateTime(now.year, now.month, now.day),
+      _DateRange.week => now.subtract(const Duration(days: 7)),
+      _DateRange.month => now.subtract(const Duration(days: 30)),
+      _DateRange.year => now.subtract(const Duration(days: 365)),
+    };
+  }
+
+  Future<void> _pickSort() async {
+    final picked = await showModalBottomSheet<_Sort>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          for (final s in _Sort.values)
+            ListTile(
+              title: Text(_sortLabels[s]!),
+              trailing: s == _sort ? const Icon(Icons.check_rounded, color: AppColors.brand) : null,
+              onTap: () => Navigator.pop(ctx, s),
+            ),
+        ]),
+      ),
+    );
+    if (picked != null) setState(() => _sort = picked);
+  }
+
+  Future<void> _pickFilter() async {
+    var date = _date;
+    var sources = {..._sources};
+    final options = [
+      for (final p in PlatformRules.current.platforms) (p.key, p.name),
+      (PlatformRules.web, 'Web'),
+    ];
+    final apply = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Date added', style: headStyle(16)),
+              const SizedBox(height: 8),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                for (final d in _DateRange.values) _chip(_dateLabels[d]!, date == d, () => setSheet(() => date = d)),
+              ]),
+              const SizedBox(height: 18),
+              Text('Source', style: headStyle(16)),
+              const SizedBox(height: 8),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                for (final (key, name) in options)
+                  _chip(name, sources.contains(key),
+                      () => setSheet(() => sources.contains(key) ? sources.remove(key) : sources.add(key))),
+              ]),
+              const SizedBox(height: 20),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => setSheet(() {
+                      date = _DateRange.any;
+                      sources = {};
+                    }),
+                    child: const Text('Clear'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Apply'))),
+              ]),
+            ]),
+          ),
+        ),
+      ),
+    );
+    if (apply == true) {
+      setState(() {
+        _date = date;
+        _sources = sources;
+      });
+    }
+  }
+
+  Widget _chip(String label, bool selected, VoidCallback onTap, {IconData? icon}) => ChoiceChip(
+        avatar: icon == null ? null : Icon(icon, size: 16, color: selected ? Colors.white : AppColors.ink),
+        label: Text(label),
+        selected: selected,
+        onSelected: (_) => onTap(),
+        showCheckmark: false,
+        selectedColor: AppColors.ink,
+        labelStyle: TextStyle(
+          color: selected ? Colors.white : AppColors.ink,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+        ),
+        side: const BorderSide(color: AppColors.line),
+        backgroundColor: AppColors.surface,
+        shape: const StadiumBorder(),
+      );
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final words = _query.text.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    final since = _since();
 
-    final results = words.isEmpty
-        ? const <Item>[]
-        : state.allItems.where((item) {
-            final folder = state.folderById(item.folderId ?? kUncategorizedId);
-            final haystack = [item.title, item.url, item.tag ?? '', folder?.name ?? '', item.addedByName ?? '']
-                .join(' ')
-                .toLowerCase();
-            return words.every(haystack.contains);
-          }).toList();
+    final results = state.allItems.where((item) {
+      if (_pinnedOnly && !item.isPinned) return false;
+      if (since != null && item.createdAt.isBefore(since)) return false;
+      if (_sources.isNotEmpty && !_sources.contains(item.source)) return false;
+      if (words.isEmpty) return true;
+      final folder = state.folderById(item.folderId ?? kUncategorizedId);
+      final haystack = [item.title, item.url, item.tag ?? '', folder?.name ?? '', item.addedByName ?? '']
+          .join(' ')
+          .toLowerCase();
+      return words.every(haystack.contains);
+    }).toList()
+      ..sort((a, b) => switch (_sort) {
+            _Sort.newest => b.createdAt.compareTo(a.createdAt),
+            _Sort.oldest => a.createdAt.compareTo(b.createdAt),
+            _Sort.title => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+            _Sort.mostViewed => b.viewCount.compareTo(a.viewCount),
+          });
+    final filtering = words.isNotEmpty || _pinnedOnly || _filterCount > 0;
+    final me = state.user?.userId;
+
+    void open(Item item) => item.isNew ? showConfirmItemSheet(context, item) : showItemDetail(context, item);
 
     return Scaffold(
       body: SafeArea(
@@ -65,26 +209,72 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
               onChanged: (_) => setState(() {}),
             ),
-            const SizedBox(height: 16),
-            if (words.isNotEmpty && results.isEmpty)
+            const SizedBox(height: 12),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                _chip('Pinned', _pinnedOnly, () => setState(() => _pinnedOnly = !_pinnedOnly),
+                    icon: Icons.push_pin_rounded),
+                const SizedBox(width: 8),
+                _chip('Sort: ${_sortLabels[_sort]}', _sort != _Sort.newest, _pickSort, icon: Icons.sort_rounded),
+                const SizedBox(width: 8),
+                _chip(_filterCount == 0 ? 'Filter' : 'Filter ($_filterCount)', _filterCount > 0, _pickFilter,
+                    icon: Icons.filter_list_rounded),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: _grid ? 'Show as list' : 'Show as grid',
+                  onPressed: () => setState(() => _grid = !_grid),
+                  icon: Icon(_grid ? Icons.view_list_rounded : Icons.grid_view_rounded),
+                ),
+              ]),
+            ),
+            const SizedBox(height: 12),
+            if (results.isEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 30),
-                child: Text('Nothing matches "${_query.text.trim()}". Try a shorter word.',
-                    textAlign: TextAlign.center, style: const TextStyle(color: AppColors.inkSoft)),
-              ),
-            for (final item in results)
-              Builder(builder: (context) {
-                final folder = state.folderById(item.folderId ?? kUncategorizedId) ?? Folder.uncategorized();
-                return ItemTile(
-                  item: item,
-                  color: Color(folder.color),
-                  shared: folder.isShared,
-                  folderLabel: '${folder.emoji} ${folder.name}',
-                  onTap: () => item.isNew ? showConfirmItemSheet(context, item) : openLink(context, item.url),
-                  onLongPress: () => showItemActions(context, item),
-                  onToggleDone: state.canMarkDone(item) ? () => toggleDone(context, item) : null,
-                );
-              }),
+                child: Text(
+                  filtering ? 'Nothing matches. Try a shorter word or clear a filter.' : 'No links saved yet.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: AppColors.inkSoft),
+                ),
+              )
+            else if (_grid)
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 0.78,
+                ),
+                itemCount: results.length,
+                itemBuilder: (context, i) {
+                  final item = results[i];
+                  final folder = state.folderById(item.folderId ?? kUncategorizedId) ?? Folder.uncategorized();
+                  return ItemGridCard(
+                    item: item,
+                    color: Color(folder.color),
+                    shared: folder.isShared,
+                    pinLabel: pinnedByLabel(item, me),
+                    onTap: () => open(item),
+                    onLongPress: () => showItemActions(context, item),
+                  );
+                },
+              )
+            else
+              for (final item in results)
+                Builder(builder: (context) {
+                  final folder = state.folderById(item.folderId ?? kUncategorizedId) ?? Folder.uncategorized();
+                  return ItemTile(
+                    item: item,
+                    color: Color(folder.color),
+                    shared: folder.isShared,
+                    folderLabel: '${folder.emoji} ${folder.name}',
+                    onTap: () => open(item),
+                    onLongPress: () => showItemActions(context, item),
+                  );
+                }),
           ],
         ),
       ),
