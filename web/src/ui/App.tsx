@@ -86,7 +86,7 @@ function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="shell">
       <aside className="rail" aria-label="Shareby">
-        <Link to="/" className="brand"><img src="/favicon.svg" alt="" /><span>Shareby</span></Link>
+        <Link to="/" className="brand"><img src="/favicon.png" alt="" /><span>Shareby</span></Link>
         <nav className="rail-nav" aria-label="Main">{TABS.map((t) => tabLink(t, 'rail-link', true))}</nav>
         <RailFolders title="Your folders" folders={personalFolders(snap)} />
         {snap.session && <RailFolders title="Shared boards" folders={sharedFolders(snap)} />}
