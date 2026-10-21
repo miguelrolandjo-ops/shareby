@@ -103,4 +103,7 @@ class ApiClient {
       _post('/folders/$folderId/invites', {'email': email, 'role': role});
 
   Future<Map<String, dynamic>> preview(String url) => _get('/preview', {'url': url});
+
+  /// The server's platform and title rules (see PlatformRules). Public, no sign-in needed.
+  Future<Map<String, dynamic>> rules() => _get('/rules');
 }

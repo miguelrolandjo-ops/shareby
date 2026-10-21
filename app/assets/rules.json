@@ -1,0 +1,249 @@
+{
+  "version": 1,
+  "platforms": [
+    {
+      "key": "instagram", "name": "Instagram", "label": "IG", "color": "#D62976",
+      "hosts": ["instagram.com", "instagr.am"],
+      "titleRules": [
+        "^(?<author>.+?)\\s+(?:on|di)\\s+Instagram\\s*:\\s*(?<title>.+)$"
+      ]
+    },
+    {
+      "key": "youtube", "name": "YouTube", "label": "YT", "color": "#D93025",
+      "hosts": ["youtube.com", "youtu.be"],
+      "titleRules": [
+        "^(?<title>.+?)\\s+[-–]\\s+YouTube$"
+      ]
+    },
+    {
+      "key": "tiktok", "name": "TikTok", "label": "TT", "color": "#111111",
+      "hosts": ["tiktok.com"],
+      "titleRules": [
+        "^(?<title>.+?)\\s*\\|\\s*(?<author>[^|]+?)\\s*\\|\\s*TikTok$",
+        "^(?<author>.+?)\\s+(?:on|di)\\s+TikTok\\s*:\\s*(?<title>.+)$"
+      ]
+    },
+    {
+      "key": "facebook", "name": "Facebook", "label": "FB", "color": "#1877F2",
+      "hosts": ["facebook.com", "fb.watch", "fb.com", "fb.me"],
+      "titleRules": [
+        "^(?<title>.+?)\\s*\\|\\s*(?<author>[^|]+?)\\s*\\|\\s*Facebook$",
+        "^(?<title>.+?)\\s*\\|\\s*Facebook$"
+      ]
+    },
+    {
+      "key": "x", "name": "X", "label": "X", "color": "#111111",
+      "hosts": ["x.com", "twitter.com", "t.co"],
+      "titleRules": [
+        "^(?<author>.+?)\\s+(?:on|di)\\s+(?:X|Twitter)\\s*:\\s*(?<title>.+)$"
+      ]
+    },
+    {
+      "key": "threads", "name": "Threads", "label": "TH", "color": "#111111",
+      "hosts": ["threads.net", "threads.com"],
+      "titleRules": [
+        "^(?<author>.+?)\\s+(?:on|di)\\s+Threads\\s*:\\s*(?<title>.+)$"
+      ]
+    },
+    {
+      "key": "linkedin", "name": "LinkedIn", "label": "IN", "color": "#0A66C2",
+      "hosts": ["linkedin.com", "lnkd.in"],
+      "titleRules": [
+        "^(?<author>.+?)\\s+(?:on|di)\\s+LinkedIn\\s*:\\s*(?<title>.+)$",
+        "^(?<title>.+?)\\s*\\|\\s*(?<author>[^|]+?)\\s*\\|\\s*LinkedIn$",
+        "^(?<title>.+?)\\s*\\|\\s*LinkedIn$"
+      ]
+    },
+    {
+      "key": "pinterest", "name": "Pinterest", "label": "PIN", "color": "#E60023",
+      "hosts": ["pinterest.com", "pin.it"],
+      "titleRules": [
+        "^(?<title>.+?)\\s*[|–-]\\s*Pinterest$"
+      ]
+    },
+    {
+      "key": "reddit", "name": "Reddit", "label": "RD", "color": "#FF4500",
+      "hosts": ["reddit.com", "redd.it"],
+      "titleRules": [
+        "^r/\\w+\\s+(?:on|di)\\s+Reddit\\s*:\\s*(?<title>.+)$",
+        "^(?<title>.+?)\\s*:\\s*r/\\w+$"
+      ]
+    },
+    {
+      "key": "spotify", "name": "Spotify", "label": "SP", "color": "#1DB954",
+      "hosts": ["spotify.com", "spotify.link"],
+      "titleRules": [
+        "^(?<title>.+?)\\s+[-–]\\s+(?:song|album|playlist|episode|single|EP|podcast)\\s+(?:and lyrics\\s+)?by\\s+(?<author>.+?)\\s*\\|\\s*Spotify$",
+        "^(?<title>.+?)\\s*\\|\\s*Spotify$"
+      ]
+    },
+    {
+      "key": "applemusic", "name": "Apple Music", "label": "AM", "color": "#FA243C",
+      "hosts": ["music.apple.com", "podcasts.apple.com"],
+      "titleRules": []
+    },
+    {
+      "key": "soundcloud", "name": "SoundCloud", "label": "SC", "color": "#FF5500",
+      "hosts": ["soundcloud.com", "on.soundcloud.com"],
+      "titleRules": [
+        "^(?<title>.+?)\\s+by\\s+(?<author>.+?)\\s*\\|\\s*Free Listening on SoundCloud$"
+      ]
+    },
+    {
+      "key": "shopee", "name": "Shopee", "label": "SHP", "color": "#EE4D2D",
+      "hosts": ["shopee.co.id", "shopee.com", "shopee.sg", "shopee.ph", "shopee.vn", "shopee.co.th", "shopee.com.my", "shopee.tw", "shopee.com.br", "shp.ee"],
+      "titleRules": [
+        "^(?<title>.+?)\\s*\\|\\s*Shopee(?:\\s+\\w+)?$"
+      ]
+    },
+    {
+      "key": "tokopedia", "name": "Tokopedia", "label": "TKP", "color": "#03AC0E",
+      "hosts": ["tokopedia.com", "tokopedia.link"],
+      "titleRules": [
+        "^(?<title>.+?)\\s*\\|\\s*Tokopedia$"
+      ]
+    },
+    {
+      "key": "lazada", "name": "Lazada", "label": "LZD", "color": "#0F146D",
+      "hosts": ["lazada.co.id", "lazada.com", "lazada.sg", "lazada.com.my", "lazada.co.th", "lazada.vn", "lazada.com.ph", "lzd.co"],
+      "titleRules": [
+        "^(?<title>.+?)\\s*\\|\\s*Lazada.*$"
+      ]
+    },
+    {
+      "key": "bukalapak", "name": "Bukalapak", "label": "BL", "color": "#E31E52",
+      "hosts": ["bukalapak.com"],
+      "titleRules": [
+        "^(?<title>.+?)\\s*\\|\\s*Bukalapak$"
+      ]
+    },
+    {
+      "key": "amazon", "name": "Amazon", "label": "AMZ", "color": "#E68A00",
+      "hosts": ["amazon.com", "amzn.to", "amzn.com", "a.co"],
+      "titleRules": [
+        "^Amazon\\.com\\s*:\\s*(?<title>.+)$"
+      ]
+    },
+    {
+      "key": "traveloka", "name": "Traveloka", "label": "TVL", "color": "#0770E3",
+      "hosts": ["traveloka.com"],
+      "titleRules": []
+    },
+    {
+      "key": "gofood", "name": "GoFood", "label": "GO", "color": "#00880C",
+      "hosts": ["gofood.link", "gojek.link", "gojek.com"],
+      "titleRules": []
+    },
+    {
+      "key": "grab", "name": "Grab", "label": "GRAB", "color": "#00B14F",
+      "hosts": ["grab.com", "r.grab.com", "grab.onelink.me"],
+      "titleRules": []
+    },
+    {
+      "key": "maps", "name": "Google Maps", "label": "MAP", "color": "#34A853",
+      "hosts": ["maps.app.goo.gl", "maps.google.com", "goo.gl/maps", "google.com/maps"],
+      "titleRules": []
+    },
+    {
+      "key": "gdocs", "name": "Google Docs", "label": "DOC", "color": "#4285F4",
+      "hosts": ["docs.google.com", "drive.google.com", "sheets.google.com", "slides.google.com"],
+      "titleRules": [
+        "^(?<title>.+?)\\s*-\\s*Google\\s+(?:Docs|Sheets|Slides|Drive)$"
+      ]
+    },
+    {
+      "key": "medium", "name": "Medium", "label": "MED", "color": "#111111",
+      "hosts": ["medium.com"],
+      "titleRules": [
+        "^(?<title>.+?)\\s*\\|\\s*by\\s+(?<author>.+?)\\s*\\|\\s*Medium$",
+        "^(?<title>.+?)\\s*\\|\\s*Medium$"
+      ]
+    },
+    {
+      "key": "substack", "name": "Substack", "label": "SUB", "color": "#FF6719",
+      "hosts": ["substack.com"],
+      "titleRules": [
+        "^(?<title>.+?)\\s*\\|\\s*(?<author>[^|]+?)\\s*\\|\\s*Substack$"
+      ]
+    },
+    {
+      "key": "quora", "name": "Quora", "label": "QU", "color": "#B92B27",
+      "hosts": ["quora.com"],
+      "titleRules": [
+        "^(?<title>.+?)\\s*-\\s*Quora$"
+      ]
+    },
+    {
+      "key": "notion", "name": "Notion", "label": "NOT", "color": "#111111",
+      "hosts": ["notion.so", "notion.site"],
+      "titleRules": []
+    },
+    {
+      "key": "github", "name": "GitHub", "label": "GH", "color": "#24292F",
+      "hosts": ["github.com", "gist.github.com"],
+      "titleRules": [
+        "^GitHub\\s*-\\s*(?<title>.+)$",
+        "^(?<title>.+?)\\s*·\\s*GitHub$"
+      ]
+    },
+    {
+      "key": "telegram", "name": "Telegram", "label": "TG", "color": "#229ED9",
+      "hosts": ["t.me", "telegram.me", "telegram.org"],
+      "titleRules": [
+        "^Telegram:\\s*(?:Contact|Join)\\s+(?<title>.+)$"
+      ]
+    },
+    {
+      "key": "whatsapp", "name": "WhatsApp", "label": "WA", "color": "#25D366",
+      "hosts": ["wa.me", "whatsapp.com", "chat.whatsapp.com"],
+      "titleRules": []
+    },
+    {
+      "key": "snapchat", "name": "Snapchat", "label": "SNAP", "color": "#E6A700",
+      "hosts": ["snapchat.com"],
+      "titleRules": []
+    },
+    {
+      "key": "twitch", "name": "Twitch", "label": "TW", "color": "#9146FF",
+      "hosts": ["twitch.tv"],
+      "titleRules": [
+        "^(?<title>.+?)\\s*-\\s*Twitch$"
+      ]
+    },
+    {
+      "key": "bilibili", "name": "Bilibili", "label": "BILI", "color": "#00A1D6",
+      "hosts": ["bilibili.com", "b23.tv"],
+      "titleRules": [
+        "^(?<title>.+?)\\s*[_-]\\s*哔哩哔哩.*$",
+        "^(?<title>.+?)\\s*-\\s*bilibili$"
+      ]
+    },
+    {
+      "key": "naver", "name": "Naver", "label": "NV", "color": "#03A94D",
+      "hosts": ["naver.com", "naver.me"],
+      "titleRules": [
+        "^(?<title>.+?)\\s*:\\s*네이버.*$"
+      ]
+    },
+    {
+      "key": "vimeo", "name": "Vimeo", "label": "VIM", "color": "#1AB7EA",
+      "hosts": ["vimeo.com"],
+      "titleRules": [
+        "^(?<title>.+?)\\s+on\\s+Vimeo$"
+      ]
+    },
+    {
+      "key": "netflix", "name": "Netflix", "label": "NF", "color": "#E50914",
+      "hosts": ["netflix.com"],
+      "titleRules": [
+        "^Watch\\s+(?<title>.+?)\\s*\\|\\s*Netflix.*$",
+        "^(?<title>.+?)\\s*\\|\\s*Netflix.*$"
+      ]
+    },
+    {
+      "key": "bluesky", "name": "Bluesky", "label": "BSKY", "color": "#1185FE",
+      "hosts": ["bsky.app"],
+      "titleRules": []
+    }
+  ]
+}

@@ -1,6 +1,8 @@
 /// Helpers for turning shared text into a clean link, title and thumbnail.
 library;
 
+import 'platforms.dart';
+
 final _urlPattern = RegExp(r'https?://[^\s<>"]+', caseSensitive: false);
 const _trailingJunk = '.,;:!?)\'"';
 
@@ -17,13 +19,8 @@ String? extractUrl(String? text) {
   return Uri.tryParse(url)?.hasAuthority == true ? url : null;
 }
 
-String detectSource(String url) {
-  final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
-  if (host.endsWith('instagram.com')) return 'instagram';
-  if (host.endsWith('youtube.com') || host == 'youtu.be') return 'youtube';
-  if (host.endsWith('tiktok.com')) return 'tiktok';
-  return 'web';
-}
+/// The platform key for [url] ('instagram', 'shopee'... or 'web'). See [PlatformRules].
+String detectSource(String url) => PlatformRules.current.detect(url);
 
 /// YouTube thumbnails can be derived from the link itself, so they work
 /// without our server. Other sources get an Open Graph lookup during sync.
@@ -95,10 +92,15 @@ String fallbackTitle(String url) {
 
 bool isFallbackTitle(String title) => title.startsWith('Saved from ');
 
-/// Share sheets usually send "caption text https://link" — keep the caption as the title.
-String titleFromShareText(String? text, String url) {
-  if (text == null) return fallbackTitle(url);
-  final cleaned = decodeHtmlEntities(text.replaceAll(url, '')).replaceAll(RegExp(r'\s+'), ' ').trim();
-  if (cleaned.length < 3) return fallbackTitle(url);
-  return cleaned.length > 120 ? '${cleaned.substring(0, 117)}...' : cleaned;
+/// Share sheets usually send "caption text https://link" — keep the caption as the title,
+/// without the platform's own wording ("Mia on Instagram: caption" -> "caption", by Mia).
+CleanedTitle cleanedShareTitle(String? text, String url) {
+  if (text == null) return CleanedTitle(fallbackTitle(url));
+  final raw = decodeHtmlEntities(text.replaceAll(url, '')).replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (raw.length < 3) return CleanedTitle(fallbackTitle(url));
+  final cleaned = PlatformRules.current.clean(url, raw);
+  final title = cleaned.title.length < 3 ? raw : cleaned.title;
+  return CleanedTitle(title.length > 120 ? '${title.substring(0, 117)}...' : title, author: cleaned.author);
 }
+
+String titleFromShareText(String? text, String url) => cleanedShareTitle(text, url).title;

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
@@ -7,12 +8,14 @@ import '../data/api_client.dart';
 import '../data/auth_service.dart';
 import '../data/local_db.dart';
 import '../data/models.dart';
+import '../data/platforms.dart';
 import '../data/refactor_planner.dart';
 import '../data/refactor_undo.dart';
 import '../data/repository.dart';
 import '../data/session_store.dart';
 import '../data/share_intake.dart';
 import '../data/sync_service.dart';
+import '../data/title_fetcher.dart';
 import '../data/url_utils.dart';
 
 /// What the sync indicator shows.
@@ -84,10 +87,16 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
-  /// Items in a folder, including [New] items suggested into it.
-  List<Item> itemsIn(String folderId) => folderId == kUncategorizedId
-      ? _items.where((i) => i.folderId == null).toList()
-      : _items.where((i) => i.folderId == folderId).toList();
+  /// Items in a folder, including [New] items suggested into it. Pinned links come first,
+  /// most recently pinned on top; the rest keep their usual order.
+  List<Item> itemsIn(String folderId) {
+    final inside = folderId == kUncategorizedId
+        ? _items.where((i) => i.folderId == null)
+        : _items.where((i) => i.folderId == folderId);
+    final pinned = inside.where((i) => i.isPinned).toList()
+      ..sort((a, b) => b.completedAt!.compareTo(a.completedAt!));
+    return [...pinned, ...inside.where((i) => !i.isPinned)];
+  }
 
   List<Member> membersOf(String folderId) => _members.where((m) => m.folderId == folderId).toList();
 
@@ -99,7 +108,7 @@ class AppState extends ChangeNotifier {
   }
 
   /// Confirmed links in personal folders, or on boards where you can add pins.
-  bool canMarkDone(Item item) {
+  bool canPin(Item item) {
     if (item.isNew) return false;
     final folder = folderById(item.folderId);
     return folder == null || !folder.isShared || folder.canAddLinks;
@@ -115,6 +124,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> init() async {
     await repo.seedIfNeeded();
+    await repo.reclassifySources(); // the platform table may have grown since the link was saved
     await _countImpressions(force: true);
     await reload();
     _periodic = Timer.periodic(AppConfig.syncInterval, (_) => unawaited(_tick()));
@@ -129,12 +139,32 @@ class AppState extends ChangeNotifier {
     await syncNow();
   }
 
-  /// Pull-to-refresh: everything above, and waits for it so the spinner means something.
-  Future<void> refresh() async {
+  /// Pull-to-refresh: everything above, plus a hard re-fetch of the links' pages and pictures
+  /// (every link, or only [folderId]'s when pulled inside a folder), and the newest platform
+  /// rules from the server. Waits for all of it so the spinner means something.
+  Future<void> refresh({String? folderId}) async {
     await _ingestShares();
     await reload();
-    await _backfillPreviews(force: true);
+    await _refreshRules();
+    await _backfillPreviews(force: true, hard: true, folderId: folderId);
     await syncNow();
+  }
+
+  /// Fetches the platform and title rules from the server when it is reachable. Silent: the
+  /// bundled or last-fetched rules keep working if the server is away.
+  Future<void> _refreshRules() async {
+    try {
+      final fresh = jsonEncode(await api.rules());
+      if (PlatformRules.adopt(fresh)) {
+        await sessions.setRulesRaw(fresh);
+        if (await repo.reclassifySources() > 0) {
+          await reload();
+          _scheduleSync();
+        }
+      }
+    } catch (_) {
+      // Offline, or the server has no rules endpoint yet.
+    }
   }
 
   Future<void>? _backfillRun;
@@ -146,11 +176,24 @@ class AppState extends ChangeNotifier {
   /// Looks up every link that is not fetched yet (see [Item.fetched]). The user's own actions
   /// ([force]: pull to refresh, opening the app, saving) retry everything at once; the
   /// background timer waits a few minutes between tries of the same link.
-  Future<void> _backfillPreviews({bool force = false}) => _backfillRun ??= _runBackfill(force).whenComplete(() {
-        _backfillRun = null;
+  ///
+  /// [hard] redoes links that are already fetched too ([folderId] limits that to one folder).
+  Future<void> _backfillPreviews({bool force = false, bool hard = false, String? folderId}) {
+    final running = _backfillRun;
+    if (running != null && !hard) return running;
+    Future<void> start() {
+      late final Future<void> run;
+      run = _runBackfill(force: force, hard: hard, folderId: folderId).whenComplete(() {
+        if (identical(_backfillRun, run)) _backfillRun = null;
       });
+      return _backfillRun = run;
+    }
 
-  Future<void> _runBackfill(bool force) async {
+    // A hard refresh must not be swallowed by a background run already in flight.
+    return running == null ? start() : running.then((_) => start());
+  }
+
+  Future<void> _runBackfill({required bool force, required bool hard, String? folderId}) async {
     final now = DateTime.now();
     final skip = <String>{
       if (!force)
@@ -159,7 +202,7 @@ class AppState extends ChangeNotifier {
     };
     final before = {...skip};
     try {
-      while (await repo.backfillPreviews(skip) > 0) {
+      while (await repo.backfillPreviews(skip, hard: hard, folderId: folderId, ignoreAttempts: force) > 0) {
         await reload();
         _scheduleSync();
       }
@@ -197,7 +240,8 @@ class AppState extends ChangeNotifier {
       if (share.choose) {
         _chooseQueue.add(share);
       } else {
-        await repo.addLink(url: share.url, title: titleFromShareText(share.text, share.url));
+        final shared = cleanedShareTitle(share.text, share.url);
+        await repo.addLink(url: share.url, title: shared.title, author: shared.author);
         saved++;
       }
     }
@@ -286,8 +330,15 @@ class AppState extends ChangeNotifier {
   Future<void> deleteFolder(Folder f, {bool keepLinks = false}) =>
       _mutate(() => repo.deleteFolder(f, keepLinks: keepLinks));
 
-  Future<Item> addLink({required String url, String? title, String? folderId}) async {
-    final item = await _mutate(() => repo.addLink(url: url, title: title, folderId: folderId));
+  Future<Item> addLink({
+    required String url,
+    String? title,
+    String? folderId,
+    String? author,
+    PagePreview? preview,
+  }) async {
+    final item = await _mutate(
+        () => repo.addLink(url: url, title: title, folderId: folderId, author: author, preview: preview));
     unawaited(_backfillPreviews(force: true));
     return item;
   }
@@ -321,15 +372,24 @@ class AppState extends ChangeNotifier {
 
   Future<void> setTag(Item item, String? tag) => _mutate(() => repo.setTag(item, tag));
 
+  Future<void> setTags(List<Item> items, String? tag) => _mutate(() => repo.setTags(items, tag));
+
   Future<void> deleteItem(Item item) => _mutate(() => repo.deleteItem(item));
 
-  Future<void> setDone(Item item, bool done) => _mutate(() => repo.setDone(item, done));
+  /// Edits a link's title and address. A new address is looked up again in the background.
+  Future<Item> updateLink(Item item, {required String title, required String url}) async {
+    final updated = await _mutate(() => repo.updateLink(item, title: title, url: url));
+    unawaited(_backfillPreviews(force: true));
+    return updated;
+  }
 
-  /// Undo a done toggle, restoring who ticked it.
-  Future<void> restoreCompletion(Item previous) async {
+  Future<void> setPinned(Item item, bool pinned) => _mutate(() => repo.setPinned(item, pinned));
+
+  /// Undo a pin toggle, restoring who pinned it.
+  Future<void> restorePin(Item previous) async {
     final current = itemById(previous.id);
     if (current == null) return;
-    await _mutate(() => repo.restoreCompletion(current, previous));
+    await _mutate(() => repo.restorePin(current, previous));
   }
 
   /// Invites need the board to exist on the server, so this syncs first and

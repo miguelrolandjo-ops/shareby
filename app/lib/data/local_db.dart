@@ -33,7 +33,7 @@ class LocalDb {
   static Future<LocalDb> open({String name = 'shareby.db'}) async {
     final db = await openDatabase(
       p.join(await getDatabasesPath(), name),
-      version: 5,
+      version: 6,
       onCreate: _create,
       onUpgrade: _upgrade,
     );
@@ -64,7 +64,10 @@ class LocalDb {
           url TEXT NOT NULL,
           title TEXT NOT NULL,
           source TEXT NOT NULL,
+          author TEXT,
           thumbnail_url TEXT,
+          thumb_path TEXT,
+          fetch_attempts INTEGER NOT NULL DEFAULT 0,
           tag TEXT,
           status TEXT NOT NULL,
           suggested_folder_id TEXT,
@@ -116,6 +119,15 @@ class LocalDb {
         ..execute('ALTER TABLE items ADD COLUMN completion_updated_at TEXT');
       await batch.commit(noResult: true);
     }
+    if (oldVersion < 6) {
+      // v6: who made the post (synced), the thumbnail file kept on this device, and how many
+      // lookups failed (both device-local).
+      final batch = db.batch()
+        ..execute('ALTER TABLE items ADD COLUMN author TEXT')
+        ..execute('ALTER TABLE items ADD COLUMN thumb_path TEXT')
+        ..execute('ALTER TABLE items ADD COLUMN fetch_attempts INTEGER NOT NULL DEFAULT 0');
+      await batch.commit(noResult: true);
+    }
     if (oldVersion < 5) {
       // v5: `fetched` = the link's page was looked up. Links that already have a thumbnail
       // answer and a real title count as fetched; the rest will be retried on refresh.
@@ -145,6 +157,11 @@ class LocalDb {
   Future<List<Item>> items() async {
     final rows = await _db.query('items', where: 'deleted = 0', orderBy: 'sort_order ASC, created_at DESC');
     return rows.map(Item.fromDb).toList();
+  }
+
+  Future<Item?> itemById(String id) async {
+    final rows = await _db.query('items', where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : Item.fromDb(rows.first);
   }
 
   Future<Folder?> folderById(String id) async {
@@ -177,6 +194,12 @@ class LocalDb {
       await txn.insert('items', i.toDb(dirty: enqueueOpId != null), conflictAlgorithm: ConflictAlgorithm.replace);
       if (enqueueOpId != null) await _enqueue(txn, enqueueOpId, 'item', i.id, i.toApi());
     });
+  }
+
+  /// Changes only device-local columns (thumb_path, fetch_attempts, fetched): no outbox
+  /// entry, no new updated_at, so it never shows up as an edit to sync.
+  Future<void> updateLocal(String itemId, Map<String, Object?> values) async {
+    await _db.update('items', values, where: 'id = ?', whereArgs: [itemId]);
   }
 
   /// Device-local counter for the auto-confirm rule; intentionally not synced.
@@ -281,13 +304,30 @@ class LocalDb {
 
       for (final i in items) {
         final existing = await txn.query('items',
-            columns: ['dirty', 'view_count', 'sort_order', 'fetched'], where: 'id = ?', whereArgs: [i.id], limit: 1);
+            columns: ['dirty', 'view_count', 'sort_order', 'fetched', 'thumbnail_url', 'thumb_path', 'fetch_attempts'],
+            where: 'id = ?',
+            whereArgs: [i.id],
+            limit: 1);
         if (existing.isNotEmpty && existing.first['dirty'] == 1) continue;
-        final views = existing.isEmpty ? 0 : (existing.first['view_count'] as int? ?? 0);
-        final order = existing.isEmpty ? null : existing.first['sort_order'] as int?;
+        final row = existing.isEmpty ? null : existing.first;
+        final views = row == null ? 0 : (row['view_count'] as int? ?? 0);
+        final order = row?['sort_order'] as int?;
         // Looked up on this device, or the server already filled in the thumbnail.
-        final fetched = (existing.isNotEmpty && existing.first['fetched'] == 1) || i.thumbnailUrl != null;
-        await txn.insert('items', i.copyWith(viewCount: views, sortOrder: order, fetched: fetched).toDb(dirty: false),
+        final fetched = (row != null && row['fetched'] == 1) || i.thumbnailUrl != null;
+        // The picture saved on this device stays, unless another device changed the link's image.
+        final sameImage = row != null && row['thumbnail_url'] == i.thumbnailUrl;
+        final thumb = sameImage ? row['thumb_path'] as String? : null;
+        await txn.insert(
+            'items',
+            i
+                .copyWith(
+                  viewCount: views,
+                  sortOrder: order,
+                  fetched: fetched,
+                  thumbPath: thumb,
+                  fetchAttempts: sameImage ? (row['fetch_attempts'] as int? ?? 0) : 0,
+                )
+                .toDb(dirty: false),
             conflictAlgorithm: ConflictAlgorithm.replace);
       }
 

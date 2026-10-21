@@ -47,6 +47,11 @@ class _SearchScreenState extends State<SearchScreen> {
   _DateRange _date = _DateRange.any;
   Set<String> _sources = {};
 
+  // Results appear a page at a time (7 grid rows, about 3 screens tall) and grow on scroll.
+  static const _pageSize = 14;
+  int _limit = _pageSize;
+  String _signature = '';
+
   @override
   void dispose() {
     _query.dispose();
@@ -183,99 +188,144 @@ class _SearchScreenState extends State<SearchScreen> {
     final filtering = words.isNotEmpty || _pinnedOnly || _filterCount > 0;
     final me = state.user?.userId;
 
+    // Any change to the query, filters or sort starts again from the first page.
+    final signature = '${_query.text}|$_pinnedOnly|$_sort|$_date|${_sources.join(",")}';
+    if (signature != _signature) {
+      _signature = signature;
+      _limit = _pageSize;
+    }
+    final shown = results.length < _limit ? results.length : _limit;
+
     void open(Item item) => item.isNew ? showConfirmItemSheet(context, item) : showItemDetail(context, item);
+
+    Widget cardAt(BuildContext context, int i) {
+      final item = results[i];
+      final folder = state.folderById(item.folderId ?? kUncategorizedId) ?? Folder.uncategorized();
+      return ItemGridCard(
+        item: item,
+        color: Color(folder.color),
+        shared: folder.isShared,
+        pinLabel: pinnedByLabel(item, me),
+        onTap: () => open(item),
+        onLongPress: () => showItemActions(context, item),
+      );
+    }
+
+    Widget tileAt(BuildContext context, int i) {
+      final item = results[i];
+      final folder = state.folderById(item.folderId ?? kUncategorizedId) ?? Folder.uncategorized();
+      return ItemTile(
+        item: item,
+        color: Color(folder.color),
+        shared: folder.isShared,
+        folderLabel: '${folder.emoji} ${folder.name}',
+        onTap: () => open(item),
+        onLongPress: () => showItemActions(context, item),
+      );
+    }
 
     return Scaffold(
       body: SafeArea(
         bottom: false,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
-          children: [
-            Text('Search', style: headStyle(26)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _query,
-              textInputAction: TextInputAction.search,
-              decoration: InputDecoration(
-                hintText: 'Try "sambal", "bali" or a friend\'s name',
-                prefixIcon: const Icon(Icons.search_rounded),
-                fillColor: AppColors.surface,
-                suffixIcon: _query.text.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.close_rounded),
-                        onPressed: () => setState(_query.clear),
+        child: RefreshIndicator(
+          onRefresh: state.refresh,
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (n) {
+              // Load the next page once the user is within one screen of the end.
+              if (shown < results.length && n.metrics.extentAfter < n.metrics.viewportDimension) {
+                setState(() => _limit += _pageSize);
+              }
+              return false;
+            },
+            child: CustomScrollView(
+              // Always pullable, even when the results fit on screen.
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                  sliver: SliverList(
+                    delegate: SliverChildListDelegate([
+                      Text('Search', style: headStyle(26)),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _query,
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          hintText: 'Try "sambal", "bali" or a friend\'s name',
+                          prefixIcon: const Icon(Icons.search_rounded),
+                          fillColor: AppColors.surface,
+                          suffixIcon: _query.text.isEmpty
+                              ? null
+                              : IconButton(
+                                  icon: const Icon(Icons.close_rounded),
+                                  onPressed: () => setState(_query.clear),
+                                ),
+                        ),
+                        onChanged: (_) => setState(() {}),
                       ),
-              ),
-              onChanged: (_) => setState(() {}),
+                      const SizedBox(height: 12),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(children: [
+                          _chip('Pinned', _pinnedOnly, () => setState(() => _pinnedOnly = !_pinnedOnly),
+                              icon: Icons.push_pin_rounded),
+                          const SizedBox(width: 8),
+                          _chip('Sort: ${_sortLabels[_sort]}', _sort != _Sort.newest, _pickSort,
+                              icon: Icons.sort_rounded),
+                          const SizedBox(width: 8),
+                          _chip(_filterCount == 0 ? 'Filter' : 'Filter ($_filterCount)', _filterCount > 0, _pickFilter,
+                              icon: Icons.filter_list_rounded),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            tooltip: _grid ? 'Show as list' : 'Show as grid',
+                            onPressed: () => setState(() => _grid = !_grid),
+                            icon: Icon(_grid ? Icons.view_list_rounded : Icons.grid_view_rounded),
+                          ),
+                        ]),
+                      ),
+                    ]),
+                  ),
+                ),
+                if (results.isEmpty)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 30),
+                      child: Text(
+                        filtering ? 'Nothing matches. Try a shorter word or clear a filter.' : 'No links saved yet.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: AppColors.inkSoft),
+                      ),
+                    ),
+                  )
+                else if (_grid)
+                  SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    sliver: SliverGrid(
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: 0.78,
+                      ),
+                      delegate: SliverChildBuilderDelegate(cardAt, childCount: shown),
+                    ),
+                  )
+                else
+                  SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    sliver: SliverList(delegate: SliverChildBuilderDelegate(tileAt, childCount: shown)),
+                  ),
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: 40,
+                    child: shown < results.length
+                        ? const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+                        : null,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(children: [
-                _chip('Pinned', _pinnedOnly, () => setState(() => _pinnedOnly = !_pinnedOnly),
-                    icon: Icons.push_pin_rounded),
-                const SizedBox(width: 8),
-                _chip('Sort: ${_sortLabels[_sort]}', _sort != _Sort.newest, _pickSort, icon: Icons.sort_rounded),
-                const SizedBox(width: 8),
-                _chip(_filterCount == 0 ? 'Filter' : 'Filter ($_filterCount)', _filterCount > 0, _pickFilter,
-                    icon: Icons.filter_list_rounded),
-                const SizedBox(width: 8),
-                IconButton(
-                  tooltip: _grid ? 'Show as list' : 'Show as grid',
-                  onPressed: () => setState(() => _grid = !_grid),
-                  icon: Icon(_grid ? Icons.view_list_rounded : Icons.grid_view_rounded),
-                ),
-              ]),
-            ),
-            const SizedBox(height: 12),
-            if (results.isEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 30),
-                child: Text(
-                  filtering ? 'Nothing matches. Try a shorter word or clear a filter.' : 'No links saved yet.',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: AppColors.inkSoft),
-                ),
-              )
-            else if (_grid)
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 0.78,
-                ),
-                itemCount: results.length,
-                itemBuilder: (context, i) {
-                  final item = results[i];
-                  final folder = state.folderById(item.folderId ?? kUncategorizedId) ?? Folder.uncategorized();
-                  return ItemGridCard(
-                    item: item,
-                    color: Color(folder.color),
-                    shared: folder.isShared,
-                    pinLabel: pinnedByLabel(item, me),
-                    onTap: () => open(item),
-                    onLongPress: () => showItemActions(context, item),
-                  );
-                },
-              )
-            else
-              for (final item in results)
-                Builder(builder: (context) {
-                  final folder = state.folderById(item.folderId ?? kUncategorizedId) ?? Folder.uncategorized();
-                  return ItemTile(
-                    item: item,
-                    color: Color(folder.color),
-                    shared: folder.isShared,
-                    folderLabel: '${folder.emoji} ${folder.name}',
-                    onTap: () => open(item),
-                    onLongPress: () => showItemActions(context, item),
-                  );
-                }),
-          ],
+          ),
         ),
       ),
     );

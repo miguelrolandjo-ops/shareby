@@ -2,17 +2,29 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../data/platforms.dart';
+import '../../data/thumbnail_store.dart';
 import '../../state/app_state.dart';
 
 IconData sourceIcon(String source) => switch (source) {
-      'youtube' => Icons.play_arrow_rounded,
-      'instagram' => Icons.camera_alt_rounded,
-      'tiktok' => Icons.music_note_rounded,
+      'youtube' || 'vimeo' || 'twitch' || 'bilibili' || 'netflix' => Icons.play_arrow_rounded,
+      'instagram' || 'snapchat' => Icons.camera_alt_rounded,
+      'tiktok' || 'spotify' || 'applemusic' || 'soundcloud' => Icons.music_note_rounded,
+      'maps' => Icons.place_rounded,
+      'github' => Icons.code_rounded,
+      'shopee' || 'tokopedia' || 'lazada' || 'bukalapak' || 'amazon' => Icons.shopping_bag_rounded,
+      'gofood' || 'grab' => Icons.restaurant_rounded,
+      'traveloka' => Icons.flight_rounded,
+      'medium' || 'substack' || 'quora' || 'notion' || 'gdocs' => Icons.article_rounded,
+      'facebook' || 'x' || 'threads' || 'linkedin' || 'reddit' || 'pinterest' || 'bluesky' ||
+      'telegram' || 'whatsapp' || 'naver' => Icons.forum_rounded,
       _ => Icons.link_rounded,
     };
 
-/// Card image. Uses the real thumbnail when there is one and it loads; otherwise
-/// (no image, offline, blocked) a placeholder drawn from the folder color and source icon.
+/// Card image: the compressed picture kept on this device (see [ThumbnailStore]). It never
+/// goes to the network, so cards look the same offline and after the site's picture expires.
+/// While there is no stored picture yet (not fetched, or failed) it shows a placeholder drawn
+/// from the folder color and the platform's icon.
 class LinkThumbnail extends StatelessWidget {
   const LinkThumbnail({super.key, required this.item, required this.color, this.size, this.radius = 12});
 
@@ -24,14 +36,14 @@ class LinkThumbnail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final placeholder = _Placeholder(color: color, icon: sourceIcon(item.source));
-    final url = item.thumbnailUrl;
-    final Widget image = (url == null || url.isEmpty)
+    final file = ThumbnailStore.instance?.fileFor(item.thumbPath);
+    final Widget image = file == null
         ? placeholder
-        : Image.network(
-            url,
+        : Image.file(
+            file,
             fit: BoxFit.cover,
+            gaplessPlayback: true,
             errorBuilder: (context, error, stack) => placeholder,
-            loadingBuilder: (context, child, progress) => progress == null ? child : placeholder,
           );
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
@@ -68,12 +80,8 @@ class SourcePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (label, bg) = switch (source) {
-      'youtube' => ('YT', const Color(0xFFD93025)),
-      'instagram' => ('IG', const Color(0xFFD62976)),
-      'tiktok' => ('TT', const Color(0xFF111111)),
-      _ => ('WEB', AppColors.inkSoft),
-    };
+    final platform = PlatformRules.current.byKey(source);
+    final (label, bg) = platform == null ? ('WEB', AppColors.inkSoft) : (platform.label, platform.color);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
@@ -82,47 +90,15 @@ class SourcePill extends StatelessWidget {
   }
 }
 
-/// The tick on the right of a link. 44px touch target around a smaller circle.
-class DoneToggle extends StatelessWidget {
-  const DoneToggle({super.key, required this.done, required this.onTap, this.size = 28, this.filledBackground = false});
+/// A small pin mark for a pinned link.
+class PinBadge extends StatelessWidget {
+  const PinBadge({super.key, this.color = AppColors.brand, this.size = 15});
 
-  final bool done;
-  final VoidCallback onTap;
+  final Color color;
   final double size;
 
-  /// White fill when unticked, for use over a thumbnail.
-  final bool filledBackground;
-
   @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      checked: done,
-      button: true,
-      label: done ? 'Done. Tap to mark as not done' : 'Mark as done',
-      excludeSemantics: true,
-      child: InkResponse(
-        onTap: onTap,
-        radius: 24,
-        child: SizedBox(
-          width: 44,
-          height: 44,
-          child: Center(
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: size,
-              height: size,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: done ? AppColors.brand : (filledBackground ? Colors.white : Colors.transparent),
-                border: Border.all(color: done ? AppColors.brand : AppColors.line, width: 2),
-              ),
-              child: done ? Icon(Icons.check_rounded, size: size * 0.62, color: Colors.white) : null,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Icon(Icons.push_pin_rounded, size: size, color: color);
 }
 
 class NewPill extends StatelessWidget {
@@ -240,13 +216,13 @@ class FolderCard extends StatelessWidget {
     required this.count,
     required this.newCount,
     required this.onTap,
-    this.doneCount = 0,
+    this.pinnedCount = 0,
   });
 
   final Folder folder;
   final int count;
   final int newCount;
-  final int doneCount;
+  final int pinnedCount;
   final VoidCallback onTap;
 
   @override
@@ -278,7 +254,7 @@ class FolderCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: headStyle(17, color: FolderPalette.deep(color))),
             const SizedBox(height: 2),
-            Text('${count == 1 ? '1 link' : '$count links'}${doneCount > 0 ? ' · $doneCount done' : ''}',
+            Text('${count == 1 ? '1 link' : '$count links'}${pinnedCount > 0 ? ' · $pinnedCount pinned' : ''}',
                 style: TextStyle(fontSize: 12.5, color: FolderPalette.deep(color).withValues(alpha: 0.8))),
           ]),
         ),

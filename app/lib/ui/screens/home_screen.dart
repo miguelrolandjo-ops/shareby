@@ -80,7 +80,7 @@ class HomeScreen extends StatelessWidget {
                     folder: f,
                     count: inside.length,
                     newCount: inside.where((it) => it.isNew).length,
-                    doneCount: inside.where((it) => it.isDone).length,
+                    pinnedCount: inside.where((it) => it.isPinned).length,
                     onTap: () => GroupDetailScreen.open(context, f.id),
                   );
                   // Uncategorized is not a real folder: it can't be moved or edited.

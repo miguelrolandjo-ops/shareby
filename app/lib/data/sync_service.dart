@@ -1,5 +1,3 @@
-import 'package:uuid/uuid.dart';
-
 import 'api_client.dart';
 import 'local_db.dart';
 import 'models.dart';
@@ -25,7 +23,6 @@ class SyncService {
   final LocalDb db;
   final ApiClient api;
   final SessionStore sessions;
-  final _uuid = Uuid();
   Future<SyncResult>? _inFlight;
 
   Future<SyncResult> run() {
@@ -40,8 +37,6 @@ class SyncService {
       // phone shows the server's version again (rare, so a full pull is fine).
       if (rejected > 0) await sessions.setPullCursor(null);
       await _pull();
-      await _resolvePreviews();
-      await _push(); // previews found above
       return SyncResult(SyncOutcome.ok, rejected: rejected);
     } on ApiUnreachable {
       return const SyncResult(SyncOutcome.offline);
@@ -87,33 +82,5 @@ class SyncService {
     );
     final cursor = res['cursor'];
     if (cursor is String) await sessions.setPullCursor(cursor);
-  }
-
-  /// Fills in card thumbnails (and better titles) from Open Graph tags, a few per sync.
-  /// Marks the link fetched, with '' when nothing is found so the lookup isn't repeated.
-  Future<void> _resolvePreviews() async {
-    final pending = (await db.items())
-        .where((i) => !i.fetched && i.source != 'youtube')
-        // Only your own saves: the server won't accept edits to a friend's pin.
-        .where((i) => i.addedBy == null || i.addedBy == sessions.current?.userId)
-        .take(5)
-        .toList();
-    for (final item in pending) {
-      String image = '';
-      String? title;
-      try {
-        final res = await api.preview(item.url);
-        final img = res['image'];
-        if (img is String && img.startsWith('http')) image = img;
-        final t = res['title'];
-        if (t is String && t.trim().isNotEmpty && item.title.startsWith('Saved from ')) title = t.trim();
-      } on ApiException {
-        // Unpreviewable link: keep the placeholder.
-      }
-      await db.saveItem(
-        item.copyWith(thumbnailUrl: image, title: title, fetched: true, updatedAt: DateTime.now().toUtc()),
-        enqueueOpId: _uuid.v4(),
-      );
-    }
   }
 }

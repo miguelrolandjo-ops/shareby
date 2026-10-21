@@ -59,10 +59,12 @@ class _RootShellState extends State<RootShell> with WidgetsBindingObserver {
     final share = _state.takeChooseRequest();
     if (share == null) return;
     _showingShare = true;
+    final shared = cleanedShareTitle(share.text, share.url);
     await showAddLinkSheet(
       context,
       initialUrl: share.url,
-      initialTitle: titleFromShareText(share.text, share.url),
+      initialTitle: shared.title,
+      initialAuthor: shared.author,
       fromShare: true,
     );
     _showingShare = false;

@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS items (
   folder_id            uuid REFERENCES folders(id) ON DELETE SET NULL,  -- NULL = Uncategorized
   url                  text NOT NULL,
   title                text NOT NULL,
-  source               text NOT NULL,          -- instagram | youtube | tiktok | web
+  source               text NOT NULL,          -- platform key from rules.json (instagram, shopee...) or web
   thumbnail_url        text,
   tag                  text,                   -- personal folders only (see trigger)
   status               text NOT NULL CHECK (status IN ('new', 'confirmed')),
@@ -80,6 +80,14 @@ CREATE TABLE IF NOT EXISTS items (
 ALTER TABLE items ADD COLUMN IF NOT EXISTS completed_at          timestamptz;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS completed_by          uuid REFERENCES users(id);
 ALTER TABLE items ADD COLUMN IF NOT EXISTS completion_updated_at timestamptz;
+
+-- Who made the post, taken from the page title ("Name on Instagram: caption" -> "Name").
+-- Syncs with the content, so it follows the same last-write-wins rule as the title.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS author text;
+
+-- The v0.2 "done" checkmark became "Pinned" (pinned links sort to the top of their folder).
+-- The columns keep their names (completed_*) so existing data and older apps keep working;
+-- they now mean "pinned at / by". On shared boards a pin is shared by everyone.
 
 CREATE INDEX IF NOT EXISTS items_folder_idx      ON items (folder_id);
 CREATE INDEX IF NOT EXISTS items_owner_idx       ON items (owner_id);

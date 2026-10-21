@@ -1,7 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shareby/data/url_utils.dart';
 
+import 'test_rules.dart';
+
 void main() {
+  setUpAll(loadBundledRules);
+
   test('extracts the link from share text and trims punctuation', () {
     expect(extractUrl('Check this out! https://www.instagram.com/reel/Cx12ab/?igsh=xyz.'),
         'https://www.instagram.com/reel/Cx12ab/?igsh=xyz');

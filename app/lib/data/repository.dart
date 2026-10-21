@@ -11,6 +11,7 @@ import 'models.dart';
 import 'refactor_planner.dart';
 import 'refactor_undo.dart';
 import 'session_store.dart';
+import 'thumbnail_store.dart';
 import 'title_fetcher.dart';
 import 'url_utils.dart';
 
@@ -27,12 +28,19 @@ class RetryResult {
 }
 
 class Repository {
-  Repository({required this.db, required this.sessions, Categorizer? categorizer})
+  Repository({required this.db, required this.sessions, Categorizer? categorizer, this.thumbs})
       : categorizer = categorizer ?? const KeywordCategorizer(threshold: AppConfig.suggestionThreshold);
 
   final LocalDb db;
   final SessionStore sessions;
   final Categorizer categorizer;
+
+  /// Where each link's compressed picture is kept. null in tests that don't touch images.
+  final ThumbnailStore? thumbs;
+
+  /// After this many failed lookups the background timer stops retrying a link on its own.
+  /// Opening the app and pull-to-refresh still try it again.
+  static const maxFetchAttempts = 3;
   final _uuid = Uuid();
 
   DateTime _now() => DateTime.now().toUtc();
@@ -124,28 +132,33 @@ class Repository {
   ///  * [folderId] == null -> "save now, sort later": auto-suggest a personal folder, mark [New].
   ///  * [folderId] == [kUncategorizedId] -> keep it in Uncategorized.
   ///  * otherwise -> straight into that folder (personal or shared board).
-  Future<Item> addLink({required String url, String? title, String? folderId}) async {
+  ///
+  /// [preview] is what the caller already looked up while the user was choosing. A link saved
+  /// before any lookup finished has `fetched = false`, and the app finishes it later.
+  Future<Item> addLink({
+    required String url,
+    String? title,
+    String? folderId,
+    String? author,
+    PagePreview? preview,
+  }) async {
     final now = _now();
     final user = sessions.current;
     var cleanTitle = (title == null || title.trim().isEmpty) ? fallbackTitle(url) : title.trim();
+    var cleanAuthor = author;
+    var found = preview;
 
     String? target;
     var status = 'confirmed';
     String? suggested;
     var confidence = 0.0;
-    String? previewImage;
-    var fetchedNow = false;
 
     if (folderId == null) {
       // A bare link ("Saved from instagram.com") gives the categorizer nothing to
       // match, so look up the real page title first.
-      if (isFallbackTitle(cleanTitle)) {
-        final preview = await fetchPagePreview(url);
-        if (preview.title != null) cleanTitle = preview.title!;
-        previewImage = preview.image;
-        fetchedNow = preview.reached;
-      }
-      final suggestion = await suggestFor('$cleanTitle $url');
+      if (isFallbackTitle(cleanTitle) && (found == null || !found.reached)) found = await fetchPagePreview(url);
+      final text = isFallbackTitle(cleanTitle) ? (found?.title ?? cleanTitle) : cleanTitle;
+      final suggestion = await suggestFor('$text $url');
       target = suggestion.folderId;
       suggested = suggestion.folderId;
       confidence = suggestion.confidence;
@@ -157,14 +170,24 @@ class Repository {
       target = folderId;
     }
 
+    final reached = found != null && found.reached;
+    if (reached) {
+      if (isFallbackTitle(cleanTitle) && found.title != null) cleanTitle = found.title!;
+      cleanAuthor ??= found.author;
+    }
+    final remoteImage = youtubeThumbnail(url) ?? (reached ? found.image : null);
+
     final item = Item(
       id: _uuid.v4(),
       folderId: target,
       url: url,
       title: cleanTitle,
       source: detectSource(url),
-      thumbnailUrl: youtubeThumbnail(url) ?? previewImage ?? (fetchedNow ? '' : null),
-      fetched: fetchedNow,
+      author: cleanAuthor,
+      // null = not looked up; '' = looked up, nothing there. The picture itself is downloaded
+      // by the fetch queue right after saving.
+      thumbnailUrl: remoteImage ?? (reached ? '' : null),
+      fetched: reached,
       status: status,
       suggestedFolderId: suggested,
       confidence: confidence,
@@ -177,37 +200,107 @@ class Repository {
     return item;
   }
 
-  /// Looks up every link that is not [Item.fetched] yet: the page's real title (where the
-  /// link only had a placeholder) and its thumbnail. A link is marked fetched only when the
-  /// site answered, so ones saved offline stay unfetched and are retried next time.
-  /// Personal saves only: edits to a board you can only view would be rejected.
+  /// The fetch queue. One pass handles up to [limit] links and returns how many it tried
+  /// (0 = nothing left), so callers loop until it reports 0.
   ///
-  /// [skip] holds links not to try (recently tried); each link tried is added to it, so one
-  /// run never repeats itself. Returns how many links were tried (0 = nothing left to do).
-  Future<int> backfillPreviews(Set<String> skip, {int limit = 6}) async {
+  /// A link needs a **lookup** (its page's title, author and picture address) while it is not
+  /// [Item.fetched], and a **download** (the picture, shrunk and kept on this device) while it
+  /// has a picture address but no stored file. Both are retried here; saving offline or before
+  /// a lookup finished just leaves the link `fetched = false`.
+  ///
+  ///  * [hard]: redo everything for the links in scope, even ones already fetched, replacing
+  ///    their stored picture. Pull-to-refresh.
+  ///  * [folderId]: limit the pass to one folder ([kUncategorizedId] for Uncategorized).
+  ///  * [ignoreAttempts]: also retry links that already failed [maxFetchAttempts] times.
+  ///  * [skip]: links not to try (recently tried); each link tried is added, so one run never
+  ///    repeats itself.
+  ///
+  /// Only your own saves are looked up (edits to a friend's pin would be rejected); the
+  /// pictures of friends' pins are still downloaded, since that is local only.
+  Future<int> backfillPreviews(
+    Set<String> skip, {
+    int limit = 6,
+    bool hard = false,
+    String? folderId,
+    bool ignoreAttempts = false,
+  }) async {
     final shared = {
       for (final f in await db.folders())
         if (f.isShared) f.id
     };
-    final todo = (await db.items())
-        .where((i) => !i.fetched && !skip.contains(i.id) && !shared.contains(i.folderId))
+    final all = await db.items();
+    if (skip.isEmpty) await thumbs?.sweep(all.map((i) => i.thumbPath).whereType<String>().toSet());
+
+    bool inScope(Item i) =>
+        folderId == null || (folderId == kUncategorizedId ? i.folderId == null : i.folderId == folderId);
+    bool canTry(Item i) => hard || ignoreAttempts || i.fetchAttempts < maxFetchAttempts;
+    bool hasPictureAddress(Item i) => i.thumbnailUrl != null && i.thumbnailUrl!.isNotEmpty;
+    bool needsLookup(Item i) => !shared.contains(i.folderId) && (hard || !i.fetched);
+    bool needsDownload(Item i) =>
+        thumbs != null && hasPictureAddress(i) && (hard || thumbs!.fileFor(i.thumbPath) == null);
+
+    final todo = all
+        .where((i) => inScope(i) && !skip.contains(i.id) && canTry(i) && (needsLookup(i) || needsDownload(i)))
         .take(limit)
         .toList();
     skip.addAll(todo.map((i) => i.id));
-    final previews = await Future.wait([for (final item in todo) fetchPagePreview(item.url)]);
-    for (var n = 0; n < todo.length; n++) {
-      final item = todo[n];
-      final preview = previews[n];
-      if (!preview.reached) continue; // offline or temporarily down: leave it for next time
-      final hasThumb = item.thumbnailUrl != null && item.thumbnailUrl!.isNotEmpty;
-      await _saveItem(item.copyWith(
-        fetched: true,
-        thumbnailUrl: hasThumb ? null : (youtubeThumbnail(item.url) ?? preview.image ?? ''),
-        title: isFallbackTitle(item.title) ? preview.title : null,
-        updatedAt: _now(),
-      ));
-    }
+    await Future.wait([for (final item in todo) _refreshOne(item, lookup: needsLookup(item))]);
     return todo.length;
+  }
+
+  Future<void> _refreshOne(Item item, {required bool lookup}) async {
+    var failed = false;
+    PagePreview? preview;
+    if (lookup) {
+      preview = await fetchPagePreview(item.url);
+      // Offline or the site is temporarily down: leave it for next time.
+      if (!preview.reached) failed = true;
+    }
+    final reached = preview != null && preview.reached;
+
+    // Where the picture comes from: the link itself (YouTube), else the page's, else what we had.
+    final had = item.thumbnailUrl ?? '';
+    final String? pictureUrl;
+    if (reached) {
+      pictureUrl = youtubeThumbnail(item.url) ?? preview.image ?? had;
+    } else {
+      pictureUrl = had.isNotEmpty ? had : (youtubeThumbnail(item.url) ?? item.thumbnailUrl);
+    }
+
+    String? storedName;
+    if (!failed && thumbs != null && pictureUrl != null && pictureUrl.isNotEmpty) {
+      storedName = await thumbs!.save(item.id, pictureUrl);
+      if (storedName == null) failed = true; // the page answered but the picture didn't: retry later
+    }
+
+    // Write onto the latest copy: the user may have edited the link while this ran.
+    final fresh = await db.itemById(item.id);
+    if (fresh == null || fresh.deleted) return;
+    final newTitle = reached && preview.title != null && isFallbackTitle(fresh.title) ? preview.title : null;
+    final newAuthor = reached && preview.author != null && fresh.author != preview.author ? preview.author : null;
+    final addressChanged = reached && pictureUrl != fresh.thumbnailUrl;
+    final synced = newTitle != null || newAuthor != null || addressChanged;
+
+    final updated = fresh.copyWith(
+      title: newTitle,
+      author: newAuthor,
+      thumbnailUrl: addressChanged ? pictureUrl : null,
+      thumbPath: storedName,
+      clearThumbPath: storedName == null && addressChanged, // the old file is of another picture
+      fetched: reached ? true : null,
+      fetchAttempts: failed ? fresh.fetchAttempts + 1 : 0,
+      updatedAt: synced ? _now() : null,
+    );
+    if (synced) {
+      await _saveItem(updated);
+    } else {
+      // Only device-local columns changed, so nothing to sync.
+      await db.updateLocal(fresh.id, {
+        'fetched': updated.fetched ? 1 : 0,
+        'thumb_path': updated.thumbPath,
+        'fetch_attempts': updated.fetchAttempts,
+      });
+    }
   }
 
   /// Uncategorized "Refactor": tries every link there against your folders once more.
@@ -234,6 +327,7 @@ class Repository {
         if (hit) matched++;
         await _saveItem(item.copyWith(
           title: preview.title,
+          author: item.author == null ? preview.author : null,
           thumbnailUrl: item.thumbnailUrl == null ? preview.image : null,
           fetched: preview.reached ? true : null,
           folderId: suggestion.folderId,
@@ -425,17 +519,69 @@ class Repository {
     ));
   }
 
-  Future<void> deleteItem(Item item) => _saveItem(item.copyWith(deleted: true, updatedAt: _now()));
+  /// After the platform table changes (a new app version, or fresh rules from the server),
+  /// links saved as plain web pages may now belong to a platform. Returns how many changed.
+  Future<int> reclassifySources() async {
+    var changed = 0;
+    for (final item in await db.items()) {
+      final now = detectSource(item.url);
+      if (now == item.source) continue;
+      await _saveItem(item.copyWith(source: now, updatedAt: _now()));
+      changed++;
+    }
+    return changed;
+  }
 
-  /// Ticks a link done (or not). Works in personal folders and, for editors, on shared
-  /// boards, where it is shared with everyone. Only completion fields change, so it never
-  /// conflicts with someone else's edit to the title or folder.
-  Future<void> setDone(Item item, bool done) async {
-    if (item.isNew) throw StateError('Confirm which folder this goes in first, then mark it done.');
+  /// Sets (or clears) one sub-category on several links at once. Personal folders only.
+  Future<void> setTags(List<Item> items, String? tag) async {
+    for (final item in items) {
+      await setTag(item, tag);
+    }
+  }
+
+  Future<void> deleteItem(Item item) async {
+    await _saveItem(item.copyWith(deleted: true, updatedAt: _now()));
+    await thumbs?.delete(item.thumbPath);
+  }
+
+  /// Edits a link's title and address. Changing the address starts a fresh lookup: the old
+  /// picture, author and platform no longer describe the page. A typed title is never
+  /// cleaned or replaced by a lookup. On a shared board only the person who added the link
+  /// (or the board's owner) can edit it, because the server only accepts edits from them.
+  Future<Item> updateLink(Item item, {required String title, required String url}) async {
+    await _requireCanEditContent(item);
+    final cleanUrl = extractUrl(url);
+    if (cleanUrl == null) throw StateError('Enter a link that starts with http:// or https://');
+    final typed = title.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final newTitle = typed.isEmpty ? fallbackTitle(cleanUrl) : (typed.length > 300 ? typed.substring(0, 300) : typed);
+    final moved = cleanUrl != item.url;
+    if (!moved && newTitle == item.title) return item;
+
+    final updated = item.copyWith(
+      url: cleanUrl,
+      title: newTitle,
+      source: detectSource(cleanUrl),
+      clearAuthor: moved,
+      clearThumbnailUrl: moved,
+      clearThumbPath: moved,
+      fetched: moved ? false : null,
+      fetchAttempts: moved ? 0 : null,
+      updatedAt: _now(),
+    );
+    await _saveItem(updated);
+    if (moved) await thumbs?.delete(item.thumbPath);
+    return updated;
+  }
+
+  /// Pins a link to the top of its folder (or unpins it). Works in personal folders and, for
+  /// editors, on shared boards, where the pin is shared with everyone. Only pin fields
+  /// change, so it never conflicts with someone else's edit to the title or folder.
+  Future<void> setPinned(Item item, bool pinned) async {
+    if (item.isNew) throw StateError('Confirm which folder this goes in first, then pin it.');
     await _requireCanChange(item);
     final now = _now();
     final user = sessions.current;
-    await _saveItem(done
+    await _saveItem(pinned
         ? item.copyWith(
             completedAt: now,
             completedBy: user?.userId,
@@ -445,33 +591,28 @@ class Repository {
         : item.copyWith(clearCompleted: true, completionUpdatedAt: now));
   }
 
-  /// Undo for [setDone]: puts back exactly who ticked it and when.
-  Future<void> restoreCompletion(Item current, Item previous) async {
+  /// Undo for [setPinned]: puts back exactly who pinned it and when.
+  Future<void> restorePin(Item current, Item previous) async {
     await _requireCanChange(current);
-    await _saveItem(Item(
-      id: current.id,
-      folderId: current.folderId,
-      url: current.url,
-      title: current.title,
-      source: current.source,
-      thumbnailUrl: current.thumbnailUrl,
-      tag: current.tag,
-      status: current.status,
-      suggestedFolderId: current.suggestedFolderId,
-      confidence: current.confidence,
-      viewCount: current.viewCount,
-      sortOrder: current.sortOrder,
-      fetched: current.fetched,
-      addedBy: current.addedBy,
-      addedByName: current.addedByName,
-      completedAt: previous.completedAt,
-      completedBy: previous.completedBy,
-      completedByName: previous.completedByName,
-      completionUpdatedAt: _now(),
-      createdAt: current.createdAt,
-      updatedAt: current.updatedAt,
-      deleted: current.deleted,
-    ));
+    await _saveItem(previous.completedAt == null
+        ? current.copyWith(clearCompleted: true, completionUpdatedAt: _now())
+        : current.copyWith(
+            completedAt: previous.completedAt,
+            completedBy: previous.completedBy,
+            completedByName: previous.completedByName,
+            completionUpdatedAt: _now(),
+          ));
+  }
+
+  /// Changing a link's title or address is the author's right (the server enforces it too).
+  Future<void> _requireCanEditContent(Item item) async {
+    final me = sessions.current?.userId;
+    if (me == null || item.folderId == null) return;
+    final folder = await db.folderById(item.folderId!);
+    if (folder == null || !folder.isShared) return;
+    if (item.addedBy != me && folder.ownerId != me) {
+      throw StateError('Only the person who added this link can edit it.');
+    }
   }
 
   Future<void> _requireCanChange(Item item) async {

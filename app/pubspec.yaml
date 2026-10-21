@@ -16,6 +16,8 @@ dependencies:
   http: ^1.2.2               # REST calls to the Shareby API (-> PostgreSQL)
   uuid: ^4.5.1               # IDs are created on the device so saves work offline
   url_launcher: ^6.3.1       # open a saved link
+  path_provider: ^2.1.5      # where the saved thumbnails live
+  image: ^4.5.4              # shrinks a link's picture to a small JPEG kept on the device
 
 dev_dependencies:
   flutter_test:
@@ -24,6 +26,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/rules.json        # platform + title rules; a newer copy is fetched from the server
   fonts:
     - family: Fredoka
       fonts:

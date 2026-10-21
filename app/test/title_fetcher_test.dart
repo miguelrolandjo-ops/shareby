@@ -6,6 +6,8 @@ import 'package:http/testing.dart';
 import 'package:shareby/data/models.dart';
 import 'package:shareby/data/title_fetcher.dart';
 
+import 'test_rules.dart';
+
 Future<PagePreview> lookup(String url, Future<http.Response> Function(http.Request) handler) =>
     http.runWithClient(() => fetchPagePreview(url), () => MockClient(handler));
 
@@ -14,6 +16,8 @@ const page = '<html><head><title>Fallback</title>'
     '<meta content="https://cdn.example.com/p.jpg" property="og:image"></head></html>';
 
 void main() {
+  setUpAll(loadBundledRules);
+
   const url = 'https://www.instagram.com/reel/abc/';
 
   group('a lookup counts as reached only when the site answered', () {

@@ -17,6 +17,7 @@ Future<void> showAddLinkSheet(
   BuildContext context, {
   String? initialUrl,
   String? initialTitle,
+  String? initialAuthor,
   String? folderId,
   bool fromShare = false,
 }) {
@@ -25,6 +26,7 @@ Future<void> showAddLinkSheet(
     (_) => _AddLinkSheet(
       initialUrl: initialUrl,
       initialTitle: initialTitle,
+      initialAuthor: initialAuthor,
       folderId: folderId,
       fromShare: fromShare,
     ),
@@ -32,10 +34,11 @@ Future<void> showAddLinkSheet(
 }
 
 class _AddLinkSheet extends StatefulWidget {
-  const _AddLinkSheet({this.initialUrl, this.initialTitle, this.folderId, required this.fromShare});
+  const _AddLinkSheet({this.initialUrl, this.initialTitle, this.initialAuthor, this.folderId, required this.fromShare});
 
   final String? initialUrl;
   final String? initialTitle;
+  final String? initialAuthor;
   final String? folderId;
   final bool fromShare;
 
@@ -50,6 +53,10 @@ class _AddLinkSheetState extends State<_AddLinkSheet> {
     text: (widget.initialTitle == null || isFallbackTitle(widget.initialTitle!)) ? '' : widget.initialTitle,
   );
   bool _lookingUpTitle = false;
+
+  /// What the page said about itself, kept so saving needs no second lookup.
+  PagePreview? _preview;
+  late String? _author = widget.initialAuthor;
   late bool _sortLater = widget.folderId == null && !widget.fromShare;
   late String? _selected = widget.folderId;
   bool _saving = false;
@@ -66,11 +73,12 @@ class _AddLinkSheetState extends State<_AddLinkSheet> {
   /// overwrites something the user has typed in the meantime.
   Future<void> _lookUpTitle(String url) async {
     setState(() => _lookingUpTitle = true);
-    final title = await fetchPageTitle(url);
-    if (!mounted) return;
+    final preview = await fetchPagePreview(url);
+    if (!mounted || _url.text.trim() != url) return; // the link was changed meanwhile
     setState(() {
       _lookingUpTitle = false;
-      if (title != null && _title.text.trim().isEmpty) _title.text = title;
+      _preview = preview;
+      if (preview.title != null && _title.text.trim().isEmpty) _title.text = preview.title!;
     });
   }
 
@@ -104,7 +112,12 @@ class _AddLinkSheetState extends State<_AddLinkSheet> {
     setState(() {
       _url.text = url;
       _urlError = null;
-      if (_title.text.trim().isEmpty) _title.text = titleFromShareText(data?.text, url);
+      if (_title.text.trim().isEmpty) {
+        final shared = cleanedShareTitle(data?.text, url);
+        _title.text = shared.title;
+        _author = shared.author;
+      }
+      _preview = null;
     });
   }
 
@@ -125,7 +138,15 @@ class _AddLinkSheetState extends State<_AddLinkSheet> {
       if (target == _kAutoCreate) {
         target = (await state.autoFolderFor(url: url, title: _title.text)).id;
       }
-      final item = await state.addLink(url: url, title: _title.text, folderId: target);
+      // A lookup made for another address must not describe this one.
+      final preview = _preview != null && url == widget.initialUrl ? _preview : null;
+      final item = await state.addLink(
+        url: url,
+        title: _title.text,
+        folderId: target,
+        author: _author ?? preview?.author,
+        preview: preview,
+      );
       if (!mounted) return;
       final where = item.folderId == null ? 'Uncategorized' : (state.folderById(item.folderId)?.name ?? 'your collection');
       final messenger = ScaffoldMessenger.of(context);

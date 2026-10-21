@@ -2,14 +2,19 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'platforms.dart';
 import 'url_utils.dart';
 
 /// What a link's page says about itself.
 class PagePreview {
-  const PagePreview({this.title, this.image, this.reached = false});
+  const PagePreview({this.title, this.image, this.author, this.reached = false});
 
+  /// Already cleaned of the platform's wording ("Mia on Instagram: caption" -> "caption").
   final String? title;
   final String? image;
+
+  /// Who made the post, when the page title says so.
+  final String? author;
 
   /// The site gave a final answer (even "no title, no image"). false = nothing came back
   /// (offline, timeout, server error), so the lookup should be tried again later.
@@ -31,9 +36,7 @@ String? _attr(String tag, String name) {
 bool isGenericTitle(String t) {
   final l = t.toLowerCase().trim();
   return l.isEmpty ||
-      l == 'instagram' ||
-      l == 'tiktok' ||
-      l == 'youtube' ||
+      PlatformRules.current.isSiteName(l) ||
       l.startsWith('login') ||
       l.startsWith('log in') ||
       l.contains('make your day') ||
@@ -50,6 +53,18 @@ String? _usableTitle(String? s) {
   final t = _clean(s);
   return (t == null || isGenericTitle(t)) ? null : t;
 }
+
+/// A page title ready to store: usable, and without the platform's wording around it.
+({String? title, String? author}) _cleanTitle(String url, String? raw) {
+  final t = _usableTitle(raw);
+  if (t == null) return (title: null, author: null);
+  final cleaned = PlatformRules.current.clean(url, t);
+  final title = isGenericTitle(cleaned.title) ? null : cleaned.title;
+  return (title: title, author: title == null ? null : cleaned.author);
+}
+
+/// Platforms that only hand their Open Graph tags to link-preview crawlers.
+const _crawlerPlatforms = {'instagram', 'tiktok', 'facebook', 'threads', 'linkedin', 'pinterest'};
 
 bool _isHost(Uri u, String domain) => u.host == domain || u.host.endsWith('.$domain');
 
@@ -68,7 +83,7 @@ Future<PagePreview> fetchPagePreview(String url, {Duration timeout = const Durat
   try {
     final res = await http.get(uri, headers: {
       // Instagram and others only serve their Open Graph tags to link-preview crawlers.
-      'User-Agent': _isHost(uri, 'instagram.com') || _isHost(uri, 'tiktok.com')
+      'User-Agent': _crawlerPlatforms.contains(PlatformRules.current.detect(url))
           ? 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)'
           : 'Mozilla/5.0 (Linux; Android 14) Shareby',
       'Accept-Language': 'en,id;q=0.8',
@@ -90,9 +105,15 @@ Future<PagePreview> fetchPagePreview(String url, {Duration timeout = const Durat
       if (key == 'og:image') ogImage ??= content;
       if (key == 'twitter:image') twitterImage ??= content;
     }
-    final title = _usableTitle(ogTitle) ?? _usableTitle(_titleTag.firstMatch(html)?.group(1));
+    final fromOg = _cleanTitle(url, ogTitle);
+    final cleaned = fromOg.title != null ? fromOg : _cleanTitle(url, _titleTag.firstMatch(html)?.group(1));
     final image = _clean(ogImage ?? twitterImage);
-    return PagePreview(title: title, image: image != null && image.startsWith('http') ? image : null, reached: true);
+    return PagePreview(
+      title: cleaned.title,
+      author: cleaned.author,
+      image: image != null && image.startsWith('http') ? image : null,
+      reached: true,
+    );
   } catch (_) {
     return const PagePreview();
   }
@@ -104,7 +125,10 @@ Future<PagePreview> _tiktokOembed(String url, Duration timeout) async {
     if (res.statusCode != 200) return const PagePreview();
     final j = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     final image = _clean(j['thumbnail_url'] as String?);
-    return PagePreview(title: _usableTitle(j['title'] as String?), image: image, reached: true);
+    final cleaned = _cleanTitle(url, j['title'] as String?);
+    // oEmbed's title is the bare caption; its author_name is who posted it.
+    final author = cleaned.author ?? _clean(j['author_name'] as String?);
+    return PagePreview(title: cleaned.title, author: author, image: image, reached: true);
   } catch (_) {
     return const PagePreview();
   }

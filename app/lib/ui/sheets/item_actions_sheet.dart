@@ -7,6 +7,7 @@ import '../../state/app_state.dart';
 import '../helpers.dart';
 import '../widgets/common.dart';
 import 'confirm_item_sheet.dart';
+import 'edit_link_sheet.dart';
 
 /// Long-press menu for a saved link. Tag and move are personal-folder features.
 Future<void> showItemActions(BuildContext context, Item item) =>
@@ -24,8 +25,7 @@ class _ItemActions extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final folder = state.folderById(item.folderId ?? kUncategorizedId) ?? Folder.uncategorized();
-    final me = state.user?.userId;
-    final canDelete = !folder.isShared || folder.isOwner || item.addedBy == me;
+    final canDelete = canDeleteItem(state, item);
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
       Row(children: [
@@ -35,26 +35,27 @@ class _ItemActions extends StatelessWidget {
       ]),
       const SizedBox(height: 12),
       _action(context, Icons.open_in_new_rounded, 'Open link', () => openLink(host, item.url)),
-      if (state.canMarkDone(item))
+      if (state.canPin(item))
         _action(
           context,
-          item.isDone ? Icons.radio_button_unchecked_rounded : Icons.check_circle_outline_rounded,
-          item.isDone ? 'Mark as not done' : 'Mark as done',
+          item.isPinned ? Icons.push_pin_outlined : Icons.push_pin_rounded,
+          item.isPinned ? 'Unpin' : 'Pin to top',
           () async {
-            if (host.mounted) await toggleDone(host, item);
+            if (host.mounted) await togglePin(host, item);
           },
         ),
+      if (canDelete) _action(context, Icons.edit_outlined, 'Edit link', () async => showEditLinkSheet(host, item)),
       if (!folder.isShared) ...[
         if (item.isNew)
           _action(context, Icons.fact_check_rounded, 'Review suggestion', () => showConfirmItemSheet(host, item)),
         _action(context, Icons.sell_outlined, item.tag == null ? 'Set sub-category' : 'Sub-category: ${item.tag}',
-            () => _editTag(state)),
+            () => editItemTag(host, item)),
         _action(
             context, Icons.drive_file_move_outline, 'Move to another folder', () => showConfirmItemSheet(host, item)),
       ],
       if (canDelete)
         _action(context, Icons.delete_outline_rounded, folder.isShared ? 'Remove pin' : 'Delete link', () async {
-          await state.deleteItem(item);
+          if (host.mounted) await confirmAndDeleteItem(host, item);
         }, danger: true),
     ]);
   }
@@ -72,22 +73,34 @@ class _ItemActions extends StatelessWidget {
       },
     );
   }
+}
 
-  Future<void> _editTag(AppState state) async {
-    if (!host.mounted) return;
-    final siblings = state.itemsIn(item.folderId ?? kUncategorizedId);
-    final existing = siblings.map((i) => i.tag).whereType<String>().toSet().toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    final picked =
-        await showAppSheet<_SubChoice>(host, (_) => _SubCategorySheet(current: item.tag, existing: existing));
-    if (picked == null) return;
+/// Picks a sub-category for one link and saves it.
+Future<void> editItemTag(BuildContext host, Item item) async {
+  if (!host.mounted) return;
+  final state = host.read<AppState>();
+  final existing = _subCategoriesIn(state, item.folderId ?? kUncategorizedId);
+  final picked = await showSubCategoryPicker(host, current: item.tag, existing: existing);
+  if (picked == null) return;
+  try {
     await state.setTag(item, picked.name);
+  } catch (e) {
+    if (host.mounted) toast(host, friendlyError(e));
   }
 }
 
+List<String> _subCategoriesIn(AppState state, String folderId) =>
+    state.itemsIn(folderId).map((i) => i.tag).whereType<String>().toSet().toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+/// Opens the sub-category sheet. null = dismissed; a [SubChoice] with a null name = remove it.
+Future<SubChoice?> showSubCategoryPicker(BuildContext host,
+        {required String? current, required List<String> existing}) =>
+    showAppSheet<SubChoice>(host, (_) => _SubCategorySheet(current: current, existing: existing));
+
 /// What the user chose in the sub-category sheet; [name] null = remove it.
-class _SubChoice {
-  const _SubChoice(this.name);
+class SubChoice {
+  const SubChoice(this.name);
   final String? name;
 }
 
@@ -117,7 +130,7 @@ class _SubCategorySheetState extends State<_SubCategorySheet> {
     if (name.isEmpty) return;
     // Reuse the folder's spelling if it already has this sub-category.
     final same = widget.existing.where((e) => e.toLowerCase() == name.toLowerCase());
-    Navigator.of(context).pop(_SubChoice(same.isNotEmpty ? same.first : name));
+    Navigator.of(context).pop(SubChoice(same.isNotEmpty ? same.first : name));
   }
 
   @override
@@ -141,7 +154,7 @@ class _SubCategorySheetState extends State<_SubCategorySheet> {
         for (final name in widget.existing)
           ChoiceRow(
             selected: name == widget.current,
-            onTap: () => Navigator.of(context).pop(_SubChoice(name)),
+            onTap: () => Navigator.of(context).pop(SubChoice(name)),
             title: name,
             leading: const EmojiBadge(emoji: '📂', color: Color(FolderPalette.grey)),
           ),
@@ -149,7 +162,7 @@ class _SubCategorySheetState extends State<_SubCategorySheet> {
       if (widget.current != null)
         ChoiceRow(
           selected: false,
-          onTap: () => Navigator.of(context).pop(const _SubChoice(null)),
+          onTap: () => Navigator.of(context).pop(const SubChoice(null)),
           title: 'No sub-category',
           leading: const EmojiBadge(emoji: '✖️', color: Color(FolderPalette.grey)),
         ),

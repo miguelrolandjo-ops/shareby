@@ -1,7 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shareby/data/categorizer.dart';
 
+import 'test_rules.dart';
+
 void main() {
+  setUpAll(loadBundledRules);
+
   const categorizer = KeywordCategorizer(threshold: 0.3);
 
   // The categorizer knows no words of its own: it matches folder names and learns from the

@@ -53,13 +53,13 @@ Future<void> openLink(BuildContext context, String url) async {
   if (!ok && context.mounted) toast(context, "Couldn't open this link");
 }
 
-/// Ticks or unticks a link and offers Undo (which also restores who ticked it).
-Future<void> toggleDone(BuildContext context, Item item) async {
+/// Pins or unpins a link and offers Undo (which also restores who pinned it).
+Future<void> togglePin(BuildContext context, Item item) async {
   final state = context.read<AppState>();
   final messenger = ScaffoldMessenger.of(context);
-  final nowDone = !item.isDone;
+  final nowPinned = !item.isPinned;
   try {
-    await state.setDone(item, nowDone);
+    await state.setPinned(item, nowPinned);
   } catch (e) {
     messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
     return;
@@ -67,16 +67,64 @@ Future<void> toggleDone(BuildContext context, Item item) async {
   messenger
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(
-      content: Text(nowDone ? 'Marked as done' : 'Moved back to to-do'),
-      action: SnackBarAction(label: 'Undo', onPressed: () => state.restoreCompletion(item)),
+      content: Text(nowPinned ? 'Pinned to the top' : 'Unpinned'),
+      action: SnackBarAction(label: 'Undo', onPressed: () => state.restorePin(item)),
     ));
 }
 
-/// "Done by Diana" / "Done by you" on shared boards.
-String doneByLabel(Item item, String? myUserId) {
-  if (item.completedBy != null && item.completedBy == myUserId) return 'Done by you';
+/// "Pinned by Diana" / "Pinned by you" on shared boards.
+String pinnedByLabel(Item item, String? myUserId) {
+  if (item.completedBy != null && item.completedBy == myUserId) return 'Pinned by you';
   final name = item.completedByName;
-  return name == null || name == 'You' ? 'Done by you' : 'Done by $name';
+  return name == null || name == 'You' ? 'Pinned by you' : 'Pinned by $name';
+}
+
+/// Who may remove a link: anyone in a personal folder; on a shared board its owner and
+/// whoever added it.
+bool canDeleteItem(AppState state, Item item) {
+  final folder = state.folderById(item.folderId ?? kUncategorizedId) ?? Folder.uncategorized();
+  return !folder.isShared || folder.isOwner || item.addedBy == state.user?.userId;
+}
+
+/// Asks "are you sure?" and, on Yes, deletes the link. Returns whether it was deleted.
+Future<bool> confirmAndDeleteItem(BuildContext context, Item item) async {
+  final state = context.read<AppState>();
+  final shared = state.folderById(item.folderId ?? kUncategorizedId)?.isShared ?? false;
+  final yes = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(shared ? 'Remove this pin?' : 'Delete this link?'),
+      content: Text(item.title, maxLines: 3, overflow: TextOverflow.ellipsis),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('No')),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          style: TextButton.styleFrom(foregroundColor: const Color(0xFFC0392B)),
+          child: Text(shared ? 'Yes, remove' : 'Yes, delete'),
+        ),
+      ],
+    ),
+  );
+  if (yes != true) return false;
+  try {
+    await state.deleteItem(item);
+    return true;
+  } catch (e) {
+    if (context.mounted) toast(context, friendlyError(e));
+    return false;
+  }
+}
+
+/// "today", "3 days ago"... for when a link was saved.
+String savedAgo(DateTime at, {DateTime? now}) {
+  final days = (now ?? DateTime.now()).difference(at.toLocal()).inDays;
+  if (days <= 0) return 'today';
+  if (days == 1) return 'yesterday';
+  if (days < 30) return '$days days ago';
+  final months = days ~/ 30;
+  if (months < 12) return months == 1 ? '1 month ago' : '$months months ago';
+  final years = days ~/ 365;
+  return years <= 1 ? '1 year ago' : '$years years ago';
 }
 
 /// "Paste link": only opens the save sheet when the clipboard holds a real link.
@@ -88,8 +136,9 @@ Future<void> pasteFromClipboard(BuildContext context, {String? folderId}) async 
     toast(context, 'No link on your clipboard. Copy a link first, then tap Paste.');
     return;
   }
+  final shared = cleanedShareTitle(data?.text, url);
   await showAddLinkSheet(context,
-      initialUrl: url, initialTitle: titleFromShareText(data?.text, url), folderId: folderId);
+      initialUrl: url, initialTitle: shared.title, initialAuthor: shared.author, folderId: folderId);
 }
 
 class SheetTitle extends StatelessWidget {

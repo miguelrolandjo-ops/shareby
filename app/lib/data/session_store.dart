@@ -22,6 +22,7 @@ class SessionStore {
   static const _cursorKey = 'pull_cursor_v1';
   static const _seededKey = 'seeded_v1';
   static const _refactorUndoKey = 'refactor_undo_v1';
+  static const _rulesKey = 'platform_rules_v1';
 
   final SharedPreferences _prefs;
   UserSession? _current;
@@ -60,6 +61,11 @@ class SessionStore {
       await _prefs.setString(_refactorUndoKey, raw);
     }
   }
+
+  /// The newest platform rules fetched from the server (JSON), used until a newer set arrives.
+  String? get rulesRaw => _prefs.getString(_rulesKey);
+
+  Future<void> setRulesRaw(String raw) async => _prefs.setString(_rulesKey, raw);
 
   bool get seeded => _prefs.getBool(_seededKey) ?? false;
   Future<void> markSeeded() async => _prefs.setBool(_seededKey, true);

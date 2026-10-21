@@ -162,6 +162,9 @@ class Item {
     this.completionUpdatedAt,
     this.sortOrder,
     this.fetched = false,
+    this.author,
+    this.thumbPath,
+    this.fetchAttempts = 0,
     this.deleted = false,
   });
 
@@ -173,8 +176,11 @@ class Item {
   final String url;
   final String title;
 
-  /// instagram | youtube | tiktok | web
+  /// A platform key from the rules table (instagram, shopee...), or 'web'.
   final String source;
+
+  /// Who made the post ("Mia" from "Mia on Instagram: ..."), when known. Synced with the title.
+  final String? author;
 
   /// null = not looked up yet, '' = looked up and nothing found.
   final String? thumbnailUrl;
@@ -192,12 +198,14 @@ class Item {
   final String? addedBy;
   final String? addedByName;
 
-  /// "Done" checkmark. On shared boards it's shared by everyone; [completedBy] is who ticked it.
+  /// "Pinned" (stored under the old "completed" names so existing data carries over): a pinned
+  /// link sorts to the top of its folder. On shared boards a pin is shared by everyone;
+  /// [completedBy] is who pinned it.
   final DateTime? completedAt;
   final String? completedBy;
   final String? completedByName;
 
-  /// When done/not-done last changed. Merged separately from content edits.
+  /// When pinned/unpinned last changed. Merged separately from content edits.
   final DateTime? completionUpdatedAt;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -210,16 +218,31 @@ class Item {
   /// confirmed to have none). false = not yet, e.g. saved offline: pull-to-refresh retries it.
   /// Device-local, never synced.
   final bool fetched;
+
+  /// File name of the compressed thumbnail kept on this device (see ThumbnailStore), or null
+  /// when there is none yet. Device-local, never synced.
+  final String? thumbPath;
+
+  /// Failed lookups so far; after a few the app stops retrying on its own. Device-local.
+  final int fetchAttempts;
   final bool deleted;
 
   bool get isNew => status == 'new';
-  bool get isDone => completedAt != null;
+  bool get isPinned => completedAt != null;
 
   Item copyWith({
     String? folderId,
     bool clearFolder = false,
     String? title,
+    String? url,
+    String? source,
+    String? author,
+    bool clearAuthor = false,
     String? thumbnailUrl,
+    bool clearThumbnailUrl = false,
+    String? thumbPath,
+    bool clearThumbPath = false,
+    int? fetchAttempts,
     String? tag,
     bool clearTag = false,
     String? status,
@@ -239,10 +262,13 @@ class Item {
       Item(
         id: id,
         folderId: clearFolder ? null : (folderId ?? this.folderId),
-        url: url,
+        url: url ?? this.url,
         title: title ?? this.title,
-        source: source,
-        thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
+        source: source ?? this.source,
+        author: clearAuthor ? null : (author ?? this.author),
+        thumbnailUrl: clearThumbnailUrl ? null : (thumbnailUrl ?? this.thumbnailUrl),
+        thumbPath: clearThumbPath ? null : (thumbPath ?? this.thumbPath),
+        fetchAttempts: fetchAttempts ?? this.fetchAttempts,
         tag: clearTag ? null : (tag ?? this.tag),
         status: status ?? this.status,
         suggestedFolderId: suggestedFolderId ?? this.suggestedFolderId,
@@ -267,7 +293,10 @@ class Item {
         'url': url,
         'title': title,
         'source': source,
+        'author': author,
         'thumbnail_url': thumbnailUrl,
+        'thumb_path': thumbPath,
+        'fetch_attempts': fetchAttempts,
         'tag': tag,
         'status': status,
         'suggested_folder_id': suggestedFolderId,
@@ -293,7 +322,10 @@ class Item {
         url: m['url'] as String,
         title: decodeHtmlEntities(m['title'] as String),
         source: m['source'] as String,
+        author: m['author'] as String?,
         thumbnailUrl: m['thumbnail_url'] as String?,
+        thumbPath: m['thumb_path'] as String?,
+        fetchAttempts: (m['fetch_attempts'] as int?) ?? 0,
         tag: m['tag'] as String?,
         status: m['status'] as String,
         suggestedFolderId: m['suggested_folder_id'] as String?,
@@ -320,6 +352,7 @@ class Item {
         'url': url,
         'title': title,
         'source': source,
+        'author': author,
         'thumbnail_url': thumbnailUrl,
         'tag': tag,
         'status': status,
@@ -338,6 +371,7 @@ class Item {
         url: j['url'] as String,
         title: decodeHtmlEntities(j['title'] as String),
         source: (j['source'] as String?) ?? 'web',
+        author: j['author'] as String?,
         thumbnailUrl: j['thumbnail_url'] as String?,
         tag: j['tag'] as String?,
         status: (j['status'] as String?) ?? 'confirmed',

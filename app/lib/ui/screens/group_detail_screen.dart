@@ -11,6 +11,7 @@ import '../sheets/confirm_item_sheet.dart';
 import '../sheets/invite_sheet.dart';
 import '../sheets/move_items_sheet.dart';
 import '../sheets/item_actions_sheet.dart';
+import '../sheets/item_detail_dialog.dart';
 import '../widgets/common.dart';
 import '../widgets/item_tiles.dart';
 
@@ -30,7 +31,6 @@ class GroupDetailScreen extends StatefulWidget {
 
 class _GroupDetailScreenState extends State<GroupDetailScreen> {
   bool _grid = false;
-  bool _doneCollapsed = false;
   String? _filter; // a tag (personal) or a member name (shared)
 
   bool _retrying = false;
@@ -117,6 +117,26 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     _stopEditing();
   }
 
+  /// Applies one sub-category to every selected link.
+  Future<void> _tagSelected(List<Item> picked) async {
+    final state = context.read<AppState>();
+    final messenger = ScaffoldMessenger.of(context);
+    final existing = state.itemsIn(widget.folderId).map((i) => i.tag).whereType<String>().toSet().toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final choice = await showSubCategoryPicker(context, current: null, existing: existing);
+    if (choice == null || !mounted) return;
+    try {
+      await state.setTags(picked, choice.name);
+    } catch (e) {
+      if (mounted) toast(context, friendlyError(e));
+      return;
+    }
+    final n = picked.length == 1 ? '1 link' : '${picked.length} links';
+    messenger.showSnackBar(
+        SnackBar(content: Text(choice.name == null ? 'Removed the sub-category from $n' : '$n added to ${choice.name}')));
+    _stopEditing();
+  }
+
   Future<void> _deleteSelected(List<Item> picked) async {
     final state = context.read<AppState>();
     final messenger = ScaffoldMessenger.of(context);
@@ -141,7 +161,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     if (item.isNew) {
       showConfirmItemSheet(context, item);
     } else {
-      openLink(context, item.url);
+      showItemDetail(context, item);
     }
   }
 
@@ -166,10 +186,10 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     final active = (_filter != null && filters.contains(_filter)) ? _filter : null;
     final visible =
         active == null ? all : all.where((i) => folder.isShared ? i.addedByName == active : i.tag == active).toList();
-    // To-do first; done links sink into their own section, most recently done first.
-    final todo = visible.where((i) => !i.isDone).toList();
-    final done = visible.where((i) => i.isDone).toList()..sort((a, b) => b.completedAt!.compareTo(a.completedAt!));
-    final doneCount = all.where((i) => i.isDone).length;
+    // Pinned links (most recently pinned first) sit on top; the rest follow.
+    final pinned = visible.where((i) => i.isPinned).toList();
+    final rest = visible.where((i) => !i.isPinned).toList();
+    final pinnedCount = all.where((i) => i.isPinned).length;
 
     final canMassEdit = !folder.isShared && all.isNotEmpty;
     // Edit list in the user's drag order; links added meanwhile go on top.
@@ -196,7 +216,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
             )
           : null,
       body: RefreshIndicator(
-        onRefresh: context.read<AppState>().refresh,
+        // Inside a folder a pull re-fetches only this folder's links (pages and pictures).
+        onRefresh: () => context.read<AppState>().refresh(folderId: folder.id),
         // The hero is part of the scroll view, so a pull from the very top refreshes.
         child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
           SliverToBoxAdapter(
@@ -204,7 +225,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                   folder: folder,
                   color: color,
                   count: all.length,
-                  doneCount: doneCount,
+                  pinnedCount: pinnedCount,
                   members: members,
                   meId: state.user?.userId,
                   editing: _editing,
@@ -255,26 +276,23 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
               ),
             )
           else ...[
-            ..._todoSlivers(todo, folder, color, state),
-            if (done.isNotEmpty) ...[
+            if (pinned.isNotEmpty) ...[
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 12, 4),
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 6),
                 sliver: SliverToBoxAdapter(
                   child: Row(children: [
-                    Text('Done', style: headStyle(16, color: AppColors.inkSoft)),
+                    Icon(Icons.push_pin_rounded, size: 17, color: color),
+                    const SizedBox(width: 6),
+                    Text('Pinned', style: headStyle(15)),
                     const SizedBox(width: 8),
-                    Text('${done.length}',
+                    Text('${pinned.length}',
                         style: const TextStyle(color: AppColors.inkFaint, fontWeight: FontWeight.w700)),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () => setState(() => _doneCollapsed = !_doneCollapsed),
-                      child: Text(_doneCollapsed ? 'Show' : 'Hide'),
-                    ),
                   ]),
                 ),
               ),
-              if (!_doneCollapsed) ..._itemSlivers(done, folder, color, state, topPadding: 0),
+              ..._itemSlivers(pinned, folder, color, state, topPadding: 0),
             ],
+            ..._groupedSlivers(rest, folder, color, state, hasPinned: pinned.isNotEmpty),
             const SliverToBoxAdapter(child: SizedBox(height: 110)),
           ],
         ]),
@@ -282,17 +300,20 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     );
   }
 
-  /// The to-do links. In a personal folder that uses sub-categories they are grouped under
-  /// a header per sub-category (links without one come first); otherwise one plain list.
-  List<Widget> _todoSlivers(List<Item> todo, Folder folder, Color color, AppState state) {
+  /// The links that are not pinned. In a personal folder that uses sub-categories they are
+  /// grouped under a header per sub-category (links without one come first); otherwise one
+  /// plain list.
+  List<Widget> _groupedSlivers(List<Item> todo, Folder folder, Color color, AppState state,
+      {required bool hasPinned}) {
     final subs = todo.map((i) => i.tag).whereType<String>().toSet().toList()
       ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final top = hasPinned ? 10.0 : 4.0;
     if (folder.isShared || subs.isEmpty) {
-      return _itemSlivers(todo, folder, color, state, topPadding: 4);
+      return _itemSlivers(todo, folder, color, state, topPadding: top);
     }
     final loose = todo.where((i) => i.tag == null).toList();
     return [
-      ..._itemSlivers(loose, folder, color, state, topPadding: 4),
+      ..._itemSlivers(loose, folder, color, state, topPadding: top),
       for (final name in subs) ...[
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
@@ -312,12 +333,11 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     ];
   }
 
-  /// One list or grid of links (used for the to-do part and the Done part).
+  /// One list or grid of links (used for the pinned part and the rest).
   List<Widget> _itemSlivers(List<Item> items, Folder folder, Color color, AppState state,
       {required double topPadding}) {
     if (items.isEmpty) return const [];
     final me = state.user?.userId;
-    VoidCallback? toggle(Item i) => state.canMarkDone(i) ? () => toggleDone(context, i) : null;
     final padding = EdgeInsets.fromLTRB(20, topPadding, 20, 0);
     if (_grid) {
       return [
@@ -335,10 +355,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                 item: items[i],
                 color: color,
                 shared: folder.isShared,
-                doneLabel: doneByLabel(items[i], me),
+                pinLabel: pinnedByLabel(items[i], me),
                 onTap: () => _onItemTap(items[i]),
                 onLongPress: () => showItemActions(context, items[i]),
-                onToggleDone: toggle(items[i]),
               ),
               childCount: items.length,
             ),
@@ -356,10 +375,11 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
               item: items[i],
               color: color,
               shared: folder.isShared,
-              doneLabel: doneByLabel(items[i], me),
+              pinLabel: pinnedByLabel(items[i], me),
               onTap: () => _onItemTap(items[i]),
               onLongPress: () => showItemActions(context, items[i]),
-              onToggleDone: toggle(items[i]),
+              onSwipePin: state.canPin(items[i]) ? () => togglePin(context, items[i]) : null,
+              onSwipeDelete: canDeleteItem(state, items[i]) ? () => confirmAndDeleteItem(context, items[i]) : null,
             ),
             childCount: items.length,
           ),
@@ -473,6 +493,15 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
               ),
               const SizedBox(width: 10),
               Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _tagSelected(picked),
+                  style: OutlinedButton.styleFrom(minimumSize: compact),
+                  icon: const Icon(Icons.sell_outlined, size: 18),
+                  label: const Text('Tag', maxLines: 1),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
                 child: FilledButton.icon(
                   onPressed: () => _deleteSelected(picked),
                   style: FilledButton.styleFrom(minimumSize: compact, backgroundColor: const Color(0xFFC0392B)),
@@ -513,7 +542,7 @@ class _Hero extends StatelessWidget {
     required this.color,
     required this.count,
     required this.members,
-    this.doneCount = 0,
+    this.pinnedCount = 0,
     this.meId,
     this.editing = false,
     this.onMassEdit,
@@ -522,14 +551,14 @@ class _Hero extends StatelessWidget {
   final Folder folder;
   final bool editing;
   final VoidCallback? onMassEdit;
-  final int doneCount;
+  final int pinnedCount;
   final String? meId;
   final Color color;
   final int count;
   final List<Member> members;
 
   String get _subtitle {
-    final done = doneCount > 0 ? ' · $doneCount done' : '';
+    final done = pinnedCount > 0 ? ' · $pinnedCount pinned' : '';
     if (!folder.isShared) {
       return '${count == 1 ? '1 link' : '$count links'}$done';
     }

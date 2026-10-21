@@ -5,6 +5,7 @@ const { authRouter, requireAuth } = require('./auth');
 const { syncRouter } = require('./sync');
 const { foldersRouter } = require('./folders');
 const { previewRouter } = require('./preview');
+const { rulesRouter } = require('./rules');
 
 const app = express();
 app.disable('x-powered-by');
@@ -19,6 +20,7 @@ app.get('/health', async (_req, res, next) => {
   }
 });
 
+app.use('/rules', rulesRouter);   // public: platform + title rules, see rules.js
 app.use('/auth', authRouter);
 app.use(requireAuth);             // everything below needs a session
 app.use('/sync', syncRouter);

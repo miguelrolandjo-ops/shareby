@@ -219,7 +219,7 @@ class _BoardCard extends StatelessWidget {
     final members = state.membersOf(board.id);
     final inside = state.itemsIn(board.id);
     final pins = inside.length;
-    final doneCount = inside.where((i) => i.isDone).length;
+    final pinnedCount = inside.where((i) => i.isPinned).length;
     final role = switch (board.myRole) { 'owner' => 'Owner', 'viewer' => 'Can view', _ => 'Can add' };
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -244,7 +244,7 @@ class _BoardCard extends StatelessWidget {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(board.name, style: headStyle(17)),
                   const SizedBox(height: 3),
-                  Text('${pins == 1 ? '1 pin' : '$pins pins'}${doneCount > 0 ? ' · $doneCount done' : ''} · $role',
+                  Text('${pins == 1 ? '1 pin' : '$pins pins'}${pinnedCount > 0 ? ' · $pinnedCount pinned' : ''} · $role',
                       style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft)),
                 ]),
               ),

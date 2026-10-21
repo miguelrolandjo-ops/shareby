@@ -6,7 +6,8 @@ const { ah, HttpError, isUuid } = require('./util');
 /** A permanent problem with one op (bad data, no permission). The client drops it. */
 class Rejection extends Error {}
 
-const SOURCES = new Set(['instagram', 'youtube', 'tiktok', 'web']);
+// Platform keys come from rules.json and grow over time, so any well-formed key is accepted.
+const SOURCE_KEY = /^[a-z0-9_-]{1,32}$/;
 const STATUSES = new Set(['new', 'confirmed']);
 
 function timestamp(value, field, { required = false } = {}) {
@@ -61,7 +62,8 @@ async function applyItem(client, user, d) {
   if (!/^https?:\/\//i.test(url) || url.length > 2048) throw new Rejection('item.url must be an http(s) link');
   const title = typeof d.title === 'string' ? d.title.trim().slice(0, 300) : '';
   if (!title) throw new Rejection('item.title is required');
-  const source = SOURCES.has(d.source) ? d.source : 'web';
+  const source = typeof d.source === 'string' && SOURCE_KEY.test(d.source) ? d.source : 'web';
+  const author = typeof d.author === 'string' && d.author.trim() ? d.author.trim().slice(0, 120) : null;
   const status = STATUSES.has(d.status) ? d.status : 'confirmed';
   const tag = typeof d.tag === 'string' && d.tag.trim() ? d.tag.trim().slice(0, 40) : null;
   const thumbnail = typeof d.thumbnail_url === 'string' ? d.thumbnail_url.slice(0, 2048) : null;
@@ -90,15 +92,15 @@ async function applyItem(client, user, d) {
      FROM items i LEFT JOIN folders f ON f.id = i.folder_id
      WHERE i.id = $1 FOR UPDATE OF i`, [d.id]);
 
-  const values = [d.id, folderId, url, title, source, thumbnail, tag, status, suggested, confidence, updatedAt, deletedAt];
+  const values = [d.id, folderId, url, title, source, thumbnail, tag, status, suggested, confidence, updatedAt, deletedAt, author];
 
   if (!existing) {
     if (folderId !== null) await requireWriter(folderId);
     await client.query(
       `INSERT INTO items (id, folder_id, url, title, source, thumbnail_url, tag, status,
-                          suggested_folder_id, confidence, updated_at, deleted_at, owner_id, created_at,
+                          suggested_folder_id, confidence, updated_at, deleted_at, author, owner_id, created_at,
                           completed_at, completed_by, completion_updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
       [...values, user.id, createdAt, completedAt, completedAt ? user.id : null, completionAt]);
     return;
   }
@@ -110,7 +112,7 @@ async function applyItem(client, user, d) {
     await client.query(
       `UPDATE items
        SET folder_id = $2, url = $3, title = $4, source = $5, thumbnail_url = $6, tag = $7, status = $8,
-           suggested_folder_id = $9, confidence = $10, updated_at = $11, deleted_at = $12,
+           suggested_folder_id = $9, confidence = $10, updated_at = $11, deleted_at = $12, author = $13,
            server_updated_at = now()
        WHERE id = $1 AND updated_at < $11`,
       values);
@@ -189,7 +191,7 @@ syncRouter.get('/pull', ah(async (req, res) => {
     [me, since]);
 
   const items = await pool.query(
-    `SELECT i.id, i.folder_id, i.url, i.title, i.source, i.thumbnail_url, i.tag, i.status,
+    `SELECT i.id, i.folder_id, i.url, i.title, i.source, i.thumbnail_url, i.tag, i.status, i.author,
             i.suggested_folder_id, i.confidence, i.created_at, i.updated_at, i.deleted_at,
             i.owner_id AS added_by, u.display_name AS added_by_name,
             i.completed_at, i.completed_by, cu.display_name AS completed_by_name, i.completion_updated_at

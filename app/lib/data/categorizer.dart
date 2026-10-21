@@ -7,6 +7,8 @@
 /// compares the save against each folder's name and confirmed items.
 library;
 
+import 'platforms.dart';
+
 class Suggestion {
   const Suggestion(this.folderId, this.confidence);
 
@@ -51,8 +53,19 @@ class KeywordCategorizer implements Categorizer {
     'link', 'saved', 'viral', 'fyp', 'foryou', 'explore',
   };
 
-  /// Hosts whose link paths are random ids, not words.
-  static const _socialHosts = ['instagram.com', 'tiktok.com', 'youtube.com', 'youtu.be', 'facebook.com', 'fb.watch'];
+  /// Platforms whose link paths are random ids, not words. Shops and blogs (shopee, medium,
+  /// github...) are left out: their paths hold readable words like "best-cafes-canggu".
+  static const _idOnlyPlatforms = {
+    'instagram', 'youtube', 'tiktok', 'facebook', 'x', 'threads', 'linkedin', 'pinterest', 'spotify',
+    'telegram', 'whatsapp', 'snapchat', 'twitch', 'bilibili', 'vimeo', 'bluesky', 'soundcloud',
+  };
+  static List<String> get _socialHosts => PlatformRules.current.hostsOf(_idOnlyPlatforms);
+
+  /// Platform names ("linkedin", "pinterest"...) say where a link is from, not what it is about.
+  /// Names that are also everyday words are left out so a "Medium" or "Maps" folder still works.
+  static const _everydayWords = {'medium', 'maps', 'notion', 'grab'};
+  static Set<String> get _platformWords =>
+      {for (final p in PlatformRules.current.platforms) if (!_everydayWords.contains(p.key)) p.key};
   static final _url = RegExp(r'https?://[^\s<>"]+', caseSensitive: false);
 
   /// Drops links before scoring. A link to a social post is just an id; any other link keeps
@@ -71,8 +84,9 @@ class KeywordCategorizer implements Categorizer {
   /// spaces, so those also contribute two-character pieces to match on.
   static Set<String> tokenize(String s) {
     final out = <String>{};
+    final platformWords = _platformWords;
     for (final t in s.toLowerCase().split(_splitter)) {
-      if (t.isEmpty || _stop.contains(t)) continue;
+      if (t.isEmpty || _stop.contains(t) || platformWords.contains(t)) continue;
       if (_cjk.hasMatch(t)) {
         if (t.length < 2) continue;
         out.add(t);
