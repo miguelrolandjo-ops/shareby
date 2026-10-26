@@ -11,6 +11,7 @@ import 'data/local_db.dart';
 import 'data/platforms.dart';
 import 'data/repository.dart';
 import 'data/session_store.dart';
+import 'data/settings_store.dart';
 import 'data/share_intake.dart';
 import 'data/sync_service.dart';
 import 'data/thumbnail_store.dart';
@@ -21,7 +22,9 @@ Future<void> main() async {
 
   // Local first: the database and session load from the device, no network needed.
   final db = await LocalDb.open();
-  final sessions = await SessionStore.open(await SharedPreferences.getInstance());
+  final prefs = await SharedPreferences.getInstance();
+  final sessions = await SessionStore.open(prefs);
+  final settings = SettingsStore(prefs)..apply(); // language and sources before the first frame
   final api = ApiClient(baseUrl: AppConfig.apiBaseUrl, tokenProvider: () => sessions.current?.token);
 
   // Platform + title rules: the copy shipped in the app, then the newest one fetched earlier.
@@ -38,6 +41,7 @@ Future<void> main() async {
     sessions: sessions,
     api: api,
     shareIntake: ShareIntake(),
+    settings: settings,
   );
   await state.init();
 

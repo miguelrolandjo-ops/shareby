@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
 import '../../data/models.dart';
-import '../../data/platforms.dart';
 import '../../data/thumbnail_store.dart';
 import '../../state/app_state.dart';
+import '../../data/sources.dart';
+import '../../l10n/l10n.dart';
 
 IconData sourceIcon(String source) => switch (source) {
       'youtube' || 'vimeo' || 'twitch' || 'bilibili' || 'netflix' => Icons.play_arrow_rounded,
@@ -73,6 +74,7 @@ class _Placeholder extends StatelessWidget {
   }
 }
 
+/// A link's source badge. Pass `SourceCatalog.current.keyOf(item)` so custom sources show.
 class SourcePill extends StatelessWidget {
   const SourcePill(this.source, {super.key});
 
@@ -80,8 +82,8 @@ class SourcePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final platform = PlatformRules.current.byKey(source);
-    final (label, bg) = platform == null ? ('WEB', AppColors.inkSoft) : (platform.label, platform.color);
+    final info = SourceCatalog.current.info(source);
+    final (label, bg) = info == null ? ('WEB', AppColors.inkSoft) : (info.label, info.color);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
@@ -109,7 +111,7 @@ class NewPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(color: AppColors.amberSoft, borderRadius: BorderRadius.circular(8)),
-      child: const Text('New', style: TextStyle(color: AppColors.amberInk, fontSize: 11, fontWeight: FontWeight.w700)),
+      child: Text(tr('New'), style: TextStyle(color: AppColors.amberInk, fontSize: 11, fontWeight: FontWeight.w700)),
     );
   }
 }
@@ -254,7 +256,11 @@ class FolderCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: headStyle(17, color: FolderPalette.deep(color))),
             const SizedBox(height: 2),
-            Text('${count == 1 ? '1 link' : '$count links'}${pinnedCount > 0 ? ' · $pinnedCount pinned' : ''}',
+            Text(
+                [
+                  trn(count, '1 link', '{n} links'),
+                  if (pinnedCount > 0) tr('{n} pinned', {'n': pinnedCount}),
+                ].join(' · '),
                 style: TextStyle(fontSize: 12.5, color: FolderPalette.deep(color).withValues(alpha: 0.8))),
           ]),
         ),
@@ -266,17 +272,17 @@ class FolderCard extends StatelessWidget {
 String syncLabel(AppState s) {
   switch (s.syncState) {
     case SyncState.localOnly:
-      return 'Saved on this device only';
+      return tr('Saved on this device only');
     case SyncState.syncing:
       return 'Syncing...';
     case SyncState.synced:
-      return s.pendingChanges > 0 ? '${s.pendingChanges} change(s) waiting to sync' : 'Synced to your Shareby account';
+      return s.pendingChanges > 0 ? tr('{pendingChanges} change(s) waiting to sync', {'pendingChanges': s.pendingChanges}) : tr('Synced to your Shareby account');
     case SyncState.offline:
       return s.pendingChanges > 0
-          ? "Offline. ${s.pendingChanges} change(s) will sync when you're back online"
-          : "Offline. Your saves are safe on this device";
+          ? tr("Offline. {pendingChanges} change(s) will sync when you're back online", {'pendingChanges': s.pendingChanges})
+          : tr('Offline. Your saves are safe on this device');
     case SyncState.error:
-      return s.syncMessage ?? "Couldn't sync. Will retry shortly";
+      return s.syncMessage ?? tr("Couldn't sync. Will retry shortly");
   }
 }
 

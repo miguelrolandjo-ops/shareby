@@ -8,6 +8,7 @@ import '../helpers.dart';
 import '../widgets/common.dart';
 import 'confirm_item_sheet.dart';
 import 'edit_link_sheet.dart';
+import '../../l10n/l10n.dart';
 
 /// Long-press menu for a saved link. Tag and move are personal-folder features.
 Future<void> showItemActions(BuildContext context, Item item) =>
@@ -34,27 +35,27 @@ class _ItemActions extends StatelessWidget {
         Expanded(child: Text(item.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: headStyle(16))),
       ]),
       const SizedBox(height: 12),
-      _action(context, Icons.open_in_new_rounded, 'Open link', () => openLink(host, item.url)),
+      _action(context, Icons.open_in_new_rounded, tr('Open link'), () => openLink(host, item.url)),
       if (state.canPin(item))
         _action(
           context,
           item.isPinned ? Icons.push_pin_outlined : Icons.push_pin_rounded,
-          item.isPinned ? 'Unpin' : 'Pin to top',
+          item.isPinned ? tr('Unpin') : tr('Pin to top'),
           () async {
             if (host.mounted) await togglePin(host, item);
           },
         ),
-      if (canDelete) _action(context, Icons.edit_outlined, 'Edit link', () async => showEditLinkSheet(host, item)),
+      if (canDelete) _action(context, Icons.edit_outlined, tr('Edit link'), () async => showEditLinkSheet(host, item)),
       if (!folder.isShared) ...[
         if (item.isNew)
-          _action(context, Icons.fact_check_rounded, 'Review suggestion', () => showConfirmItemSheet(host, item)),
-        _action(context, Icons.sell_outlined, item.tag == null ? 'Set sub-category' : 'Sub-category: ${item.tag}',
+          _action(context, Icons.fact_check_rounded, tr('Review suggestion'), () => showConfirmItemSheet(host, item)),
+        _action(context, Icons.sell_outlined, item.tag == null ? tr('Set sub-category') : 'Sub-category: ${item.tag}',
             () => editItemTag(host, item)),
         _action(
-            context, Icons.drive_file_move_outline, 'Move to another folder', () => showConfirmItemSheet(host, item)),
+            context, Icons.drive_file_move_outline, tr('Move to another folder'), () => showConfirmItemSheet(host, item)),
       ],
       if (canDelete)
-        _action(context, Icons.delete_outline_rounded, folder.isShared ? 'Remove pin' : 'Delete link', () async {
+        _action(context, Icons.delete_outline_rounded, folder.isShared ? tr('Remove pin') : tr('Delete link'), () async {
           if (host.mounted) await confirmAndDeleteItem(host, item);
         }, danger: true),
     ]);
@@ -136,21 +137,21 @@ class _SubCategorySheetState extends State<_SubCategorySheet> {
   @override
   Widget build(BuildContext context) {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-      const SheetTitle('Sub-category', subtitle: 'Group links inside this folder.'),
+      SheetTitle(tr('Sub-category'), subtitle: tr('Group links inside this folder.')),
       TextField(
         controller: _controller,
         textCapitalization: TextCapitalization.sentences,
         maxLength: 40,
         decoration: InputDecoration(
-          hintText: 'New sub-category, e.g. Dance practice',
+          hintText: tr('New sub-category, e.g. Dance practice'),
           counterText: '',
-          suffixIcon: IconButton(tooltip: 'Add', icon: const Icon(Icons.check_rounded), onPressed: _submitNew),
+          suffixIcon: IconButton(tooltip: tr('Add'), icon: const Icon(Icons.check_rounded), onPressed: _submitNew),
         ),
         onChanged: (_) => setState(() {}),
         onSubmitted: (_) => _submitNew(),
       ),
       if (widget.existing.isNotEmpty) ...[
-        const FieldLabel('In this folder'),
+        FieldLabel(tr('In this folder')),
         for (final name in widget.existing)
           ChoiceRow(
             selected: name == widget.current,
@@ -163,7 +164,7 @@ class _SubCategorySheetState extends State<_SubCategorySheet> {
         ChoiceRow(
           selected: false,
           onTap: () => Navigator.of(context).pop(const SubChoice(null)),
-          title: 'No sub-category',
+          title: tr('No sub-category'),
           leading: const EmojiBadge(emoji: '✖️', color: Color(FolderPalette.grey)),
         ),
     ]);

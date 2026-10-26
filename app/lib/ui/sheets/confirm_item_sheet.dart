@@ -4,10 +4,12 @@ import 'package:provider/provider.dart';
 import '../../core/config.dart';
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../l10n/l10n.dart';
 import '../../state/app_state.dart';
 import '../helpers.dart';
 import '../widgets/common.dart';
 import 'add_folder_sheet.dart';
+import '../../data/sources.dart';
 
 /// Review an auto-categorized [New] save: confirm the suggestion or pick another folder.
 Future<void> showConfirmItemSheet(BuildContext context, Item item) =>
@@ -30,12 +32,22 @@ class _ConfirmItemSheetState extends State<_ConfirmItemSheet> {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     await state.confirmItem(widget.item, moveTo: moveTo);
-    final name = state.folderById(moveTo ?? widget.item.folderId ?? kUncategorizedId)?.name ?? 'Uncategorized';
+    final name = state.folderById(moveTo ?? widget.item.folderId ?? kUncategorizedId)?.name ?? tr('Uncategorized');
     navigator.pop();
-    messenger.showSnackBar(SnackBar(content: Text('Filed in $name')));
+    messenger.showSnackBar(SnackBar(content: Text(tr('Filed in {name}', {'name': name}))));
   }
 
   bool _busy = false;
+
+  /// Asks first (OK / Cancel), then deletes and closes the sheet.
+  Future<void> _delete() async {
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    if (await confirmAndDeleteItem(context, widget.item)) {
+      navigator.pop();
+      messenger.showSnackBar(SnackBar(content: Text(tr('Link deleted'))));
+    }
+  }
 
   Future<void> _createYourself() async {
     final folder = await showAddFolderSheet(context);
@@ -65,17 +77,39 @@ class _ConfirmItemSheetState extends State<_ConfirmItemSheet> {
     final views = item.viewCount.clamp(0, AppConfig.autoConfirmAfterViews);
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-      Row(children: [
-        LinkThumbnail(item: item, color: color, size: 64),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(item.title, maxLines: 3, overflow: TextOverflow.ellipsis, style: headStyle(17)),
-            const SizedBox(height: 6),
-            SourcePill(item.source),
+      // Tapping the link opens it first, for when you don't remember what it was. Opening
+      // doesn't file it; the choice below still decides.
+      InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => openLink(context, item.url),
+        child: Row(children: [
+          Stack(alignment: Alignment.center, children: [
+            LinkThumbnail(item: item, color: color, size: 64),
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: const BoxDecoration(color: Color(0x88000000), shape: BoxShape.circle),
+              child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 20),
+            ),
           ]),
-        ),
-      ]),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(item.title, maxLines: 3, overflow: TextOverflow.ellipsis, style: headStyle(17)),
+              const SizedBox(height: 6),
+              Row(children: [
+                SourcePill(SourceCatalog.current.keyOf(item)),
+                const SizedBox(width: 8),
+                const Icon(Icons.open_in_new_rounded, size: 14, color: AppColors.brand),
+                const SizedBox(width: 3),
+                Flexible(
+                  child: Text(tr('Open link'),
+                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.brand)),
+                ),
+              ]),
+            ]),
+          ),
+        ]),
+      ),
       if (item.isNew) ...[
       const SizedBox(height: 18),
       Container(
@@ -86,7 +120,7 @@ class _ConfirmItemSheetState extends State<_ConfirmItemSheet> {
             Text(suggested.emoji, style: const TextStyle(fontSize: 18)),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(item.folderId == null ? 'No confident match' : 'Suggested: ${suggested.name}',
+              child: Text(item.folderId == null ? tr('No confident match') : 'Suggested: ${suggested.name}',
                   style: TextStyle(fontWeight: FontWeight.w700, color: FolderPalette.deep(color))),
             ),
             Text('${(item.confidence * 100).round()}%',
@@ -120,30 +154,52 @@ class _ConfirmItemSheetState extends State<_ConfirmItemSheet> {
       ]),
       const SizedBox(height: 6),
       Text(
-        'Shown $views of ${AppConfig.autoConfirmAfterViews} times. '
-        "If you don't choose, we'll file it here the next time you open Shareby.",
+        tr("Shown {views} of {autoConfirmAfterViews} times. If you don't choose, we'll file it here the next time you open Shareby.", {'views': views, 'autoConfirmAfterViews': AppConfig.autoConfirmAfterViews}),
         style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft, height: 1.35),
       ),
       ],
       const SizedBox(height: 16),
       if (!_changing) ...[
-        FilledButton(onPressed: () => _confirm(), child: Text('Keep in ${suggested.name}')),
+        FilledButton(onPressed: () => _confirm(), child: Text(tr('Keep in {folder}', {'folder': suggested.name}))),
         const SizedBox(height: 10),
-        OutlinedButton(onPressed: () => setState(() => _changing = true), child: const Text('Choose a different folder')),
+        Row(children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: () => setState(() => _changing = true),
+              child: Text(tr('Choose a different folder')),
+            ),
+          ),
+          const SizedBox(width: 10),
+          // Square, as tall as the buttons: drop a save you don't want after all.
+          SizedBox(
+            width: 52,
+            height: 52,
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(52, 52),
+                padding: EdgeInsets.zero,
+                foregroundColor: const Color(0xFFC0392B),
+                side: const BorderSide(color: Color(0x55C0392B)),
+              ),
+              onPressed: _delete,
+              child: Tooltip(message: tr('Delete'), child: const Icon(Icons.delete_outline_rounded)),
+            ),
+          ),
+        ]),
       ] else ...[
-        FieldLabel(item.isNew ? 'File it in' : 'Move to'),
+        FieldLabel(item.isNew ? tr('File it in') : tr('Move to')),
         ChoiceRow(
           selected: false,
           onTap: _busy ? () {} : _createYourself,
-          title: 'Create one yourself',
-          subtitle: 'Name a new folder',
+          title: tr('Create one yourself'),
+          subtitle: tr('Name a new folder'),
           leading: const EmojiBadge(emoji: '✏️', color: Color(FolderPalette.grey)),
         ),
         ChoiceRow(
           selected: false,
           onTap: _busy ? () {} : _autoCreate,
-          title: _busy ? 'Creating...' : 'Auto create suggested folder',
-          subtitle: 'We pick a general name that fits, or reuse one you have',
+          title: _busy ? 'Creating...' : tr('Auto create suggested folder'),
+          subtitle: tr('We pick a general name that fits, or reuse one you have'),
           leading: const EmojiBadge(emoji: '✨', color: Color(FolderPalette.amber)),
         ),
         for (final f in [...state.personalFolders, Folder.uncategorized()])

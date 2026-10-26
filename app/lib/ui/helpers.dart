@@ -9,6 +9,7 @@ import '../data/models.dart';
 import '../data/url_utils.dart';
 import '../state/app_state.dart';
 import 'sheets/add_link_sheet.dart';
+import '../l10n/l10n.dart';
 
 /// Bottom sheet that grows with its content and stays above the keyboard.
 Future<T?> showAppSheet<T>(BuildContext context, WidgetBuilder builder) {
@@ -34,10 +35,10 @@ void toast(BuildContext context, String message) {
 
 /// Turns exceptions into sentences a user can act on.
 String friendlyError(Object error) {
-  if (error is ApiUnreachable) return "Can't reach Shareby. Check your connection and try again.";
+  if (error is ApiUnreachable) return tr("Can't reach Shareby. Check your connection and try again.");
   if (error is ApiException) return error.message;
   if (error is StateError) return error.message;
-  return 'Something went wrong. Please try again.';
+  return tr('Something went wrong. Please try again.');
 }
 
 Future<void> openLink(BuildContext context, String url) async {
@@ -50,7 +51,7 @@ Future<void> openLink(BuildContext context, String url) async {
       ok = false;
     }
   }
-  if (!ok && context.mounted) toast(context, "Couldn't open this link");
+  if (!ok && context.mounted) toast(context, tr("Couldn't open this link"));
 }
 
 /// Pins or unpins a link and offers Undo (which also restores who pinned it).
@@ -67,16 +68,16 @@ Future<void> togglePin(BuildContext context, Item item) async {
   messenger
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(
-      content: Text(nowPinned ? 'Pinned to the top' : 'Unpinned'),
-      action: SnackBarAction(label: 'Undo', onPressed: () => state.restorePin(item)),
+      content: Text(nowPinned ? tr('Pinned to the top') : tr('Unpinned')),
+      action: SnackBarAction(label: tr('Undo'), onPressed: () => state.restorePin(item)),
     ));
 }
 
 /// "Pinned by Diana" / "Pinned by you" on shared boards.
 String pinnedByLabel(Item item, String? myUserId) {
-  if (item.completedBy != null && item.completedBy == myUserId) return 'Pinned by you';
+  if (item.completedBy != null && item.completedBy == myUserId) return tr('Pinned by you');
   final name = item.completedByName;
-  return name == null || name == 'You' ? 'Pinned by you' : 'Pinned by $name';
+  return name == null || name == 'You' ? tr('Pinned by you') : tr('Pinned by {name}', {'name': name});
 }
 
 /// Who may remove a link: anyone in a personal folder; on a shared board its owner and
@@ -93,14 +94,14 @@ Future<bool> confirmAndDeleteItem(BuildContext context, Item item) async {
   final yes = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: Text(shared ? 'Remove this pin?' : 'Delete this link?'),
+      title: Text(shared ? tr('Remove this pin?') : tr('Delete this link?')),
       content: Text(item.title, maxLines: 3, overflow: TextOverflow.ellipsis),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('No')),
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('Cancel'))),
         TextButton(
           onPressed: () => Navigator.pop(ctx, true),
           style: TextButton.styleFrom(foregroundColor: const Color(0xFFC0392B)),
-          child: Text(shared ? 'Yes, remove' : 'Yes, delete'),
+          child: Text(shared ? tr('Remove') : tr('Delete')),
         ),
       ],
     ),
@@ -118,13 +119,13 @@ Future<bool> confirmAndDeleteItem(BuildContext context, Item item) async {
 /// "today", "3 days ago"... for when a link was saved.
 String savedAgo(DateTime at, {DateTime? now}) {
   final days = (now ?? DateTime.now()).difference(at.toLocal()).inDays;
-  if (days <= 0) return 'today';
-  if (days == 1) return 'yesterday';
-  if (days < 30) return '$days days ago';
+  if (days <= 0) return tr('today');
+  if (days == 1) return tr('yesterday');
+  if (days < 30) return tr('{n} days ago', {'n': days});
   final months = days ~/ 30;
-  if (months < 12) return months == 1 ? '1 month ago' : '$months months ago';
+  if (months < 12) return trn(months, '1 month ago', '{n} months ago');
   final years = days ~/ 365;
-  return years <= 1 ? '1 year ago' : '$years years ago';
+  return trn(years <= 1 ? 1 : years, '1 year ago', '{n} years ago');
 }
 
 /// "Paste link": only opens the save sheet when the clipboard holds a real link.
@@ -133,7 +134,7 @@ Future<void> pasteFromClipboard(BuildContext context, {String? folderId}) async 
   if (!context.mounted) return;
   final url = extractUrl(data?.text);
   if (url == null) {
-    toast(context, 'No link on your clipboard. Copy a link first, then tap Paste.');
+    toast(context, tr('No link on your clipboard. Copy a link first, then tap Paste.'));
     return;
   }
   final shared = cleanedShareTitle(data?.text, url);

@@ -5,6 +5,7 @@
 /// already have fits (e.g. they have "Music"), that one is reused instead.
 library;
 
+import '../l10n/l10n.dart';
 import 'categorizer.dart';
 
 class FolderProposal {
@@ -456,11 +457,40 @@ class FolderNamer {
     ]),
   ];
 
+  /// Topic names for Indonesian users (folder names are created in the app's language).
+  static const _idNames = {
+    'Music': 'Musik',
+    'Recipes': 'Resep',
+    'Food Spots': 'Kuliner',
+    'Cafes': 'Kafe',
+    'Travel': 'Jalan-jalan',
+    'Fitness': 'Olahraga',
+    'Beauty': 'Kecantikan',
+    'Tech': 'Teknologi',
+    'Sewing & Crafts': 'Jahit & Kerajinan',
+    'Movies & TV': 'Film & Serial',
+    'Home & DIY': 'Rumah & DIY',
+    'Money': 'Keuangan',
+    'Learning': 'Belajar',
+    'Pets': 'Hewan Peliharaan',
+    'Books': 'Buku',
+    'Gift Ideas': 'Ide Kado',
+    'Funny': 'Lucu',
+    'Art & Design': 'Seni & Desain',
+  };
+
+  static String _localName(_Topic t) => L10n.current == AppLanguage.id ? (_idNames[t.name] ?? t.name) : t.name;
+
   /// A fitting icon for a folder the user named themselves ("Music" -> 🎵), else a plain folder.
   String emojiFor(String name) {
     final n = name.trim().toLowerCase();
     for (final t in _topics) {
-      if (t.name.toLowerCase() == n || t.keywords.contains(n) || t.broader.contains(n)) return t.emoji;
+      if (t.name.toLowerCase() == n ||
+          _idNames[t.name]?.toLowerCase() == n ||
+          t.keywords.contains(n) ||
+          t.broader.contains(n)) {
+        return t.emoji;
+      }
     }
     return '📁';
   }
@@ -491,13 +521,13 @@ class FolderNamer {
     if (best == null) return const FolderProposal(name: 'Inspo', emoji: '✨');
 
     // Reuse a folder the user already has that covers this topic or a broader one.
-    final stems = [best.name.toLowerCase(), ...best.broader];
+    final stems = [best.name.toLowerCase(), if (_idNames[best.name] case final id?) id.toLowerCase(), ...best.broader];
     for (final entry in existingNames.entries) {
       final n = entry.value.toLowerCase();
       if (stems.any((s) => n == s || n.contains(s))) {
         return FolderProposal(name: entry.value, emoji: best.emoji, existingId: entry.key);
       }
     }
-    return FolderProposal(name: best.name, emoji: best.emoji);
+    return FolderProposal(name: _localName(best), emoji: best.emoji);
   }
 }

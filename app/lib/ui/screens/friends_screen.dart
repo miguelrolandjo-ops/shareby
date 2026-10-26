@@ -10,6 +10,7 @@ import '../sheets/add_folder_sheet.dart';
 import '../sheets/invite_sheet.dart';
 import '../widgets/common.dart';
 import 'group_detail_screen.dart';
+import '../../l10n/l10n.dart';
 
 class FriendsScreen extends StatelessWidget {
   const FriendsScreen({super.key});
@@ -61,9 +62,9 @@ Future<void> startSignIn(BuildContext context) async {
       spinnerUp = true;
       await state.signInDev(provider: 'google', email: details.$1, displayName: details.$2);
     } else {
-      throw StateError("Sign-in isn't set up on the server yet.");
+      throw StateError(tr("Sign-in isn't set up on the server yet."));
     }
-    messenger.showSnackBar(const SnackBar(content: Text('Signed in. Your saves are backing up and sharing is on.')));
+    messenger.showSnackBar(SnackBar(content: Text(tr('Signed in. Your saves are backing up and sharing is on.'))));
   } on SignInCancelled {
     // The user closed Google's picker.
   } catch (e) {
@@ -89,23 +90,22 @@ class _Locked extends StatelessWidget {
           child: const Icon(Icons.group_rounded, size: 38, color: AppColors.lilac),
         ),
         const SizedBox(height: 20),
-        Text('Build boards with friends', style: headStyle(26)),
+        Text(tr('Build boards with friends'), style: headStyle(26)),
         const SizedBox(height: 10),
-        const Text(
-          'Sign in to plan trips, gift lists and weekend ideas together. '
-          'Signing in also backs up everything you have saved on this phone.',
+        Text(
+          tr('Sign in to plan trips, gift lists and weekend ideas together. Signing in also backs up everything you have saved on this phone.'),
           style: TextStyle(color: AppColors.inkSoft, fontSize: 15, height: 1.45),
         ),
         const SizedBox(height: 28),
         OutlinedButton.icon(
           onPressed: () => startSignIn(context),
           icon: const Text('G', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: Color(0xFF4285F4))),
-          label: const Text('Continue with Google'),
+          label: Text(tr('Continue with Google')),
         ),
         const SizedBox(height: 22),
-        const InfoNote(
+        InfoNote(
           icon: Icons.lock_outline_rounded,
-          text: 'Your personal folders stay private. Only boards you create here are shared.',
+          text: tr('Your personal folders stay private. Only boards you create here are shared.'),
         ),
       ],
     );
@@ -135,9 +135,9 @@ class _DevSignInDialogState extends State<_DevSignInDialog> {
   Widget build(BuildContext context) {
     final valid = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(_email.text.trim());
     return AlertDialog(
-      title: const Text('Sign in (development)'),
+      title: Text(tr('Sign in (development)')),
       content: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Text('This server allows test sign-ins: enter any email to act as that account.',
+        Text(tr('This server allows test sign-ins: enter any email to act as that account.'),
             style: TextStyle(color: AppColors.inkSoft, fontSize: 13)),
         const SizedBox(height: 14),
         TextField(
@@ -145,18 +145,18 @@ class _DevSignInDialogState extends State<_DevSignInDialog> {
           keyboardType: TextInputType.emailAddress,
           autocorrect: false,
           autofocus: true,
-          decoration: const InputDecoration(hintText: 'you@gmail.com'),
+          decoration: InputDecoration(hintText: tr('you@gmail.com')),
           onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 10),
         TextField(
           controller: _name,
           textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(hintText: 'Your name'),
+          decoration: InputDecoration(hintText: tr('Your name')),
         ),
       ]),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Cancel'))),
         TextButton(
           onPressed: valid
               ? () {
@@ -165,7 +165,7 @@ class _DevSignInDialogState extends State<_DevSignInDialog> {
                   Navigator.pop(context, (email, name));
                 }
               : null,
-          child: const Text('Continue'),
+          child: Text(tr('Continue')),
         ),
       ],
     );
@@ -189,35 +189,34 @@ class _SharedBoards extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
         children: [
-          Text('Friends', style: headStyle(26)),
+          Text(tr('Friends'), style: headStyle(26)),
           const SizedBox(height: 6),
           SyncStatusLine(state: state),
           const SizedBox(height: 22),
-          SectionTitle('Shared boards',
+          SectionTitle(tr('Shared boards'),
               trailing: TextButton.icon(
                 onPressed: () => _newBoard(context),
                 icon: const Icon(Icons.add_rounded),
-                label: const Text('New board'),
+                label: Text(tr('New board')),
               )),
           if (boards.isEmpty)
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16)),
               child: Column(children: [
-                const Text('No shared boards yet', style: TextStyle(fontWeight: FontWeight.w700)),
+                Text(tr('No shared boards yet'), style: TextStyle(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 4),
-                const Text('Create one and invite friends by email.',
+                Text(tr('Create one and invite friends by email.'),
                     textAlign: TextAlign.center, style: TextStyle(color: AppColors.inkSoft)),
                 const SizedBox(height: 14),
-                FilledButton(onPressed: () => _newBoard(context), child: const Text('Create a board')),
+                FilledButton(onPressed: () => _newBoard(context), child: Text(tr('Create a board'))),
               ]),
             )
           else
             for (final b in boards) _BoardCard(board: b, state: state),
           const SizedBox(height: 14),
-          const InfoNote(
-            text: 'Tags and auto-sorting are for your personal folders. '
-                'Everything on a shared board is placed by whoever pins it.',
+          InfoNote(
+            text: tr('Tags and auto-sorting are for your personal folders. Everything on a shared board is placed by whoever pins it.'),
           ),
         ],
       ),
@@ -237,7 +236,7 @@ class _BoardCard extends StatelessWidget {
     final inside = state.itemsIn(board.id);
     final pins = inside.length;
     final pinnedCount = inside.where((i) => i.isPinned).length;
-    final role = switch (board.myRole) { 'owner' => 'Owner', 'viewer' => 'Can view', _ => 'Can add' };
+    final role = switch (board.myRole) { 'owner' => tr('Owner'), 'viewer' => tr('Can view'), _ => tr('Can add') };
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
@@ -261,7 +260,12 @@ class _BoardCard extends StatelessWidget {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(board.name, style: headStyle(17)),
                   const SizedBox(height: 3),
-                  Text('${pins == 1 ? '1 pin' : '$pins pins'}${pinnedCount > 0 ? ' · $pinnedCount pinned' : ''} · $role',
+                  Text(
+                      [
+                        trn(pins, '1 pin', '{n} pins'),
+                        if (pinnedCount > 0) tr('{n} pinned', {'n': pinnedCount}),
+                        role,
+                      ].join(' · '),
                       style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft)),
                 ]),
               ),

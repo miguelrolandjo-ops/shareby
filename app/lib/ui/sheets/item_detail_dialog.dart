@@ -9,6 +9,8 @@ import '../widgets/common.dart';
 import 'confirm_item_sheet.dart';
 import 'edit_link_sheet.dart';
 import 'item_actions_sheet.dart';
+import '../../data/sources.dart';
+import '../../l10n/l10n.dart';
 
 /// Tapping a saved link opens this pop-out box. The picture and "Visit link" go to the link;
 /// the row underneath holds the actions (pin, edit, move, sub-category, delete).
@@ -66,14 +68,14 @@ class _ItemDetail extends StatelessWidget {
           // The picture: tap to visit the link.
           Semantics(
             button: true,
-            label: 'Open link',
+            label: tr('Open link'),
             child: InkWell(
               onTap: () => openLink(host, item.url),
               child: AspectRatio(
                 aspectRatio: 16 / 10,
                 child: Stack(fit: StackFit.expand, children: [
                   LinkThumbnail(item: item, color: color, radius: 0),
-                  Positioned(left: 12, top: 12, child: SourcePill(item.source)),
+                  Positioned(left: 12, top: 12, child: SourcePill(SourceCatalog.current.keyOf(item))),
                   if (item.isPinned) const Positioned(right: 12, top: 12, child: _PinnedChip()),
                   Positioned(
                     right: 12,
@@ -94,13 +96,16 @@ class _ItemDetail extends StatelessWidget {
               Text(item.title, maxLines: 4, overflow: TextOverflow.ellipsis, style: headStyle(19)),
               if (item.author != null) ...[
                 const SizedBox(height: 4),
-                Text('by ${item.author}', style: const TextStyle(color: AppColors.inkSoft, fontWeight: FontWeight.w600)),
+                Text(tr('by {author}', {'author': item.author}), style: const TextStyle(color: AppColors.inkSoft, fontWeight: FontWeight.w600)),
               ],
               const SizedBox(height: 10),
               Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
                 _Chip(icon: Icons.folder_rounded, text: folder.name, color: color),
                 if (item.tag != null) _Chip(icon: Icons.sell_outlined, text: item.tag!, color: AppColors.inkSoft),
-                Text('Saved ${savedAgo(item.createdAt)}${item.addedByName != null && folder.isShared ? ' by ${item.addedByName}' : ''}',
+                Text(
+                    item.addedByName != null && folder.isShared
+                        ? tr('Saved {when} by {name}', {'when': savedAgo(item.createdAt), 'name': item.addedByName})
+                        : tr('Saved {when}', {'when': savedAgo(item.createdAt)}),
                     style: const TextStyle(fontSize: 12.5, color: AppColors.inkFaint)),
               ]),
               if (item.isPinned && folder.isShared) ...[
@@ -115,7 +120,7 @@ class _ItemDetail extends StatelessWidget {
             child: FilledButton.icon(
               onPressed: () => openLink(host, item.url),
               icon: const Icon(Icons.open_in_new_rounded, size: 18),
-              label: const Text('Visit link'),
+              label: Text(tr('Visit link')),
             ),
           ),
           Padding(
@@ -123,15 +128,15 @@ class _ItemDetail extends StatelessWidget {
             child: Wrap(alignment: WrapAlignment.center, children: [
               if (state.canPin(item))
                 action(item.isPinned ? Icons.push_pin_outlined : Icons.push_pin_rounded,
-                    item.isPinned ? 'Unpin' : 'Pin', () => togglePin(host, item)),
-              if (canEdit) action(Icons.edit_outlined, 'Edit', () => closeThen(() async => showEditLinkSheet(host, item))),
+                    item.isPinned ? tr('Unpin') : tr('Pin'), () => togglePin(host, item)),
+              if (canEdit) action(Icons.edit_outlined, tr('Edit'), () => closeThen(() async => showEditLinkSheet(host, item))),
               if (!folder.isShared) ...[
-                action(Icons.drive_file_move_outline, item.isNew ? 'Review' : 'Move',
+                action(Icons.drive_file_move_outline, item.isNew ? tr('Review') : tr('Move'),
                     () => closeThen(() async => showConfirmItemSheet(host, item))),
                 action(Icons.sell_outlined, 'Sub-category', () => closeThen(() => editItemTag(host, item))),
               ],
               if (canEdit)
-                action(Icons.delete_outline_rounded, folder.isShared ? 'Remove' : 'Delete', () async {
+                action(Icons.delete_outline_rounded, folder.isShared ? tr('Remove') : tr('Delete'), () async {
                   // Ask first; the box closes only if the link was really deleted.
                   await confirmAndDeleteItem(context, item);
                 }, danger: true),
@@ -150,10 +155,10 @@ class _PinnedChip extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(color: AppColors.brand, borderRadius: BorderRadius.circular(10)),
-        child: const Row(mainAxisSize: MainAxisSize.min, children: [
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.push_pin_rounded, size: 13, color: Colors.white),
           SizedBox(width: 4),
-          Text('Pinned', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+          Text(tr('Pinned'), style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
         ]),
       );
 }

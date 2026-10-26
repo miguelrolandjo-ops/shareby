@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
 import '../../data/models.dart';
+import '../../l10n/l10n.dart';
 import 'common.dart';
+import '../../data/sources.dart';
 
 /// A saved link as a list row. Shared boards show who added it; personal folders show tags.
 ///
@@ -16,6 +18,8 @@ class ItemTile extends StatelessWidget {
     required this.onTap,
     this.onLongPress,
     this.onSwipePin,
+    this.onSwipeKeep,
+    this.keepLabel,
     this.onSwipeDelete,
     this.pinLabel,
     this.shared = false,
@@ -34,6 +38,12 @@ class ItemTile extends StatelessWidget {
   /// Pin or unpin (null for [New] items and for viewers, which turns the swipe off).
   final VoidCallback? onSwipePin;
 
+  /// Swipe right on a [New] link: keep the suggested folder (used instead of [onSwipePin]).
+  final Future<void> Function()? onSwipeKeep;
+
+  /// Text on the swipe-right background for [onSwipeKeep], e.g. "Keep in Cooking".
+  final String? keepLabel;
+
   /// Asks, then deletes. Called when the user swipes left.
   final Future<void> Function()? onSwipeDelete;
 
@@ -43,7 +53,7 @@ class ItemTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final meta = folderLabel ??
-        (shared ? (item.isPinned ? (pinLabel ?? 'Pinned') : 'added by ${item.addedByName ?? 'someone'}') : (item.author ?? item.tag));
+        (shared ? (item.isPinned ? (pinLabel ?? tr('Pinned')) : tr('added by {name}', {'name': item.addedByName ?? tr('someone')})) : (item.author ?? item.tag));
     final card = Material(
       color: AppColors.surface,
       borderRadius: BorderRadius.circular(16),
@@ -68,7 +78,7 @@ class ItemTile extends StatelessWidget {
                     style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, height: 1.3, color: AppColors.ink)),
                 const SizedBox(height: 6),
                 Row(children: [
-                  SourcePill(item.source),
+                  SourcePill(SourceCatalog.current.keyOf(item)),
                   if (meta != null) ...[
                     const SizedBox(width: 6),
                     Flexible(
@@ -94,9 +104,10 @@ class ItemTile extends StatelessWidget {
       ),
     );
 
-    final direction = onSwipePin != null && onSwipeDelete != null
+    final right = onSwipeKeep != null || onSwipePin != null;
+    final direction = right && onSwipeDelete != null
         ? DismissDirection.horizontal
-        : onSwipePin != null
+        : right
             ? DismissDirection.startToEnd
             : onSwipeDelete != null
                 ? DismissDirection.endToStart
@@ -110,23 +121,34 @@ class ItemTile extends StatelessWidget {
               key: ValueKey('swipe-${item.id}'),
               direction: direction,
               dismissThresholds: const {DismissDirection.startToEnd: 0.3, DismissDirection.endToStart: 0.4},
-              background: _SwipeBackground(
-                color: color,
-                icon: item.isPinned ? Icons.push_pin_outlined : Icons.push_pin_rounded,
-                label: item.isPinned ? 'Unpin' : 'Pin',
-                alignment: Alignment.centerLeft,
-              ),
-              secondaryBackground: const _SwipeBackground(
-                color: Color(0xFFC0392B),
+              background: onSwipeKeep != null
+                  ? _SwipeBackground(
+                      color: AppColors.brand,
+                      icon: Icons.check_rounded,
+                      label: keepLabel ?? tr('Keep'),
+                      alignment: Alignment.centerLeft,
+                    )
+                  : _SwipeBackground(
+                      color: color,
+                      icon: item.isPinned ? Icons.push_pin_outlined : Icons.push_pin_rounded,
+                      label: item.isPinned ? tr('Unpin') : tr('Pin'),
+                      alignment: Alignment.centerLeft,
+                    ),
+              secondaryBackground: _SwipeBackground(
+                color: const Color(0xFFC0392B),
                 icon: Icons.delete_outline_rounded,
-                label: 'Delete',
+                label: tr('Delete'),
                 alignment: Alignment.centerRight,
               ),
               // The action is done here, and the row always springs back: the list itself
               // re-sorts (pinned to the top) or drops the link once the change lands.
               confirmDismiss: (dir) async {
                 if (dir == DismissDirection.startToEnd) {
-                  onSwipePin?.call();
+                  if (onSwipeKeep != null) {
+                    await onSwipeKeep!();
+                  } else {
+                    onSwipePin?.call();
+                  }
                 } else {
                   await onSwipeDelete?.call();
                 }
@@ -196,7 +218,7 @@ class ItemGridCard extends StatelessWidget {
           Expanded(
             child: Stack(fit: StackFit.expand, children: [
               LinkThumbnail(item: item, color: color, radius: 0),
-              Positioned(left: 8, top: 8, child: SourcePill(item.source)),
+              Positioned(left: 8, top: 8, child: SourcePill(SourceCatalog.current.keyOf(item))),
               if (item.isNew) const Positioned(right: 8, top: 8, child: NewPill()),
               if (pinned && !item.isNew)
                 Positioned(
@@ -219,7 +241,7 @@ class ItemGridCard extends StatelessWidget {
                   style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, height: 1.3, color: AppColors.ink)),
               if (shared) ...[
                 const SizedBox(height: 4),
-                Text(pinned ? (pinLabel ?? 'Pinned') : 'by ${item.addedByName ?? 'someone'}',
+                Text(pinned ? (pinLabel ?? tr('Pinned')) : 'by ${item.addedByName ?? 'someone'}',
                     maxLines: 1, style: const TextStyle(fontSize: 11.5, color: AppColors.inkSoft)),
               ] else if (item.author != null || item.tag != null) ...[
                 const SizedBox(height: 4),

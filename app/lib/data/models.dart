@@ -4,6 +4,7 @@
 library;
 
 import 'url_utils.dart';
+import '../l10n/l10n.dart';
 
 /// Pseudo-folder for personal saves that have no collection.
 const kUncategorizedId = '__uncategorized__';
@@ -53,7 +54,7 @@ class Folder {
 
   static Folder uncategorized() => Folder(
         id: kUncategorizedId,
-        name: 'Uncategorized',
+        name: tr('Uncategorized'),
         color: 0xFF9AA39D,
         emoji: '🗂️',
         isShared: false,
@@ -419,7 +420,7 @@ class Member {
   factory Member.fromApi(Map<String, dynamic> j) => Member(
         folderId: j['folder_id'] as String,
         userId: j['user_id'] as String,
-        displayName: (j['display_name'] as String?) ?? 'Friend',
+        displayName: (j['display_name'] as String?) ?? tr('Friend'),
         role: (j['role'] as String?) ?? 'editor',
       );
 }

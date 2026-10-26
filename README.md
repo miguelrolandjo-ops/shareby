@@ -177,12 +177,19 @@ BASE_URL=http://localhost:8000 node e2e/smoke.cjs
   (`flutter_secure_storage`). Set up in [deploy/DEPLOY.md](deploy/DEPLOY.md#2-google-sign-in-google-cloud-console).
 - **Account deletion** (required by Google Play): Profile → *Delete account*, phone and web
   (`DELETE /account`). Personal saves stay on the device, like signing out.
-- **Languages.** The interface is in English (pinned, so system labels stay English on phones
-  set to another language). Auto-sorting and folder suggestions understand English and
-  Indonesian titles: English plurals match either way ("Recipes" folder ↔ "pasta recipe",
-  "gyms" ↔ "gym"), the web app knows common English folder names (Recipes, Workouts, Books,
-  Gifts...), and "Sort it for me" can propose English topics such as Books and Gift Ideas.
-  Link previews ask sites for English first, then Indonesian.
+- **Languages and regions.** First launch asks for your region, which picks the language
+  (Indonesia → Bahasa Indonesia, elsewhere → English; changeable) and switches on the sources
+  people there use most. Every app text is written in English and wrapped in `tr()`; the
+  Indonesian table is `app/lib/l10n/strings_id.dart`, and `test/l10n_test.dart` fails when a
+  text has no translation. The Android share popup follows the same setting.
+- **Sources.** Profile → Sources switches built-in sources on or off (what the search filter
+  lists) and adds your own from a name and an example link. Custom sources stay on the device
+  and are recognised from the link address, so other devices are unaffected. Sorting uses
+  sources too: a folder that is mostly one source (all Spotify links in Music) attracts new
+  links from it, and auto-sorting understands English and Indonesian titles.
+- **Refresh.** Pull-to-refresh returns at once and works behind a thin bar at the top: rules,
+  sync, and links still missing a preview (six lookups at a time). Re-checking every link is
+  Profile → Refresh all previews.
 
 ## iOS (phase 2)
 

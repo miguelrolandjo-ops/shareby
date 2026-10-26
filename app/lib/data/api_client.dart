@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
+import '../l10n/l10n.dart';
 
 /// The server could not be reached (no connection, timeout, DNS...). Treated as "offline".
 class ApiUnreachable implements Exception {
@@ -71,7 +72,7 @@ class ApiClient {
     }
     if (res.statusCode >= 200 && res.statusCode < 300) return body;
     final error = body['error'];
-    throw ApiException(res.statusCode, error is String ? error : 'Request failed (${res.statusCode})');
+    throw ApiException(res.statusCode, error is String ? error : tr('Request failed ({code})', {'code': res.statusCode}));
   }
 
   Future<Map<String, dynamic>> _get(String path, [Map<String, String>? query]) =>

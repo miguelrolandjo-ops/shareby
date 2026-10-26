@@ -2,6 +2,7 @@
 library;
 
 import 'platforms.dart';
+import '../l10n/l10n.dart';
 
 final _urlPattern = RegExp(r'https?://[^\s<>"]+', caseSensitive: false);
 const _trailingJunk = '.,;:!?)\'"';
@@ -87,10 +88,12 @@ String decodeHtmlEntities(String input) {
 
 String fallbackTitle(String url) {
   final host = (Uri.tryParse(url)?.host ?? '').replaceFirst(RegExp(r'^www\.'), '');
-  return host.isEmpty ? url : 'Saved from $host';
+  return host.isEmpty ? url : tr('Saved from {host}', {'host': host});
 }
 
-bool isFallbackTitle(String title) => title.startsWith('Saved from ');
+/// True for a placeholder title made by [fallbackTitle], in any of the app's languages
+/// (another device may have made it in its own language).
+bool isFallbackTitle(String title) => title.startsWith('Saved from ') || title.startsWith('Disimpan dari ');
 
 /// Share sheets usually send "caption text https://link" — keep the caption as the title,
 /// without the platform's own wording ("Mia on Instagram: caption" -> "caption", by Mia).

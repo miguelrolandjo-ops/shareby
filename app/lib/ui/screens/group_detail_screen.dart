@@ -14,6 +14,7 @@ import '../sheets/item_actions_sheet.dart';
 import '../sheets/item_detail_dialog.dart';
 import '../widgets/common.dart';
 import '../widgets/item_tiles.dart';
+import '../../l10n/l10n.dart';
 
 /// One folder or shared board. Opened with [open] as a pushed route, so Back returns
 /// to the list it was opened from (Home for folders, Friends for shared boards).
@@ -42,9 +43,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     try {
       final r = await state.retryUncategorized();
       final found = r.matched == 0
-          ? 'No folder fits these yet'
-          : 'Found a folder for ${r.matched} ${r.matched == 1 ? 'link' : 'links'}. Confirm them on Home';
-      final rest = r.matched > 0 && r.unmatched > 0 ? ' · ${r.unmatched} still unmatched' : '';
+          ? tr('No folder fits these yet')
+          : trn(r.matched, 'Found a folder for 1 link. Confirm it on Home', 'Found a folder for {n} links. Confirm them on Home');
+      final rest = r.matched > 0 && r.unmatched > 0 ? tr(' · {unmatched} still unmatched', {'unmatched': r.unmatched}) : '';
       messenger.showSnackBar(SnackBar(content: Text('$found$rest')));
     } catch (e) {
       if (mounted) toast(context, friendlyError(e));
@@ -64,11 +65,10 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
             border: Border.all(color: AppColors.line),
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Try sorting these again', style: TextStyle(fontWeight: FontWeight.w700)),
+            Text(tr('Try sorting these again'), style: TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
-            const Text(
-              'Shareby checks each link against your folders once more. '
-              'Links that still match nothing stay here quietly.',
+            Text(
+              tr('Shareby checks each link against your folders once more. Links that still match nothing stay here quietly.'),
               style: TextStyle(color: AppColors.inkSoft, fontSize: 13, height: 1.35),
             ),
             const SizedBox(height: 10),
@@ -79,7 +79,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                   ? const SizedBox(
                       width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.auto_awesome_rounded, size: 18),
-              label: Text(_retrying ? 'Checking...' : 'Recategorize'),
+              label: Text(_retrying ? 'Checking...' : tr('Recategorize')),
             ),
           ]),
         ),
@@ -112,8 +112,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     final target = await showMoveItemsSheet(context, count: picked.length, currentFolderId: folder.id);
     if (target == null || !mounted) return;
     await state.moveItems(picked, target);
-    final name = state.folderById(target)?.name ?? 'Uncategorized';
-    messenger.showSnackBar(SnackBar(content: Text('Moved ${picked.length} to $name')));
+    final name = state.folderById(target)?.name ?? tr('Uncategorized');
+    messenger.showSnackBar(SnackBar(content: Text(tr('Moved {picked} to {name}', {'picked': picked.length, 'name': name}))));
     _stopEditing();
   }
 
@@ -131,9 +131,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
       if (mounted) toast(context, friendlyError(e));
       return;
     }
-    final n = picked.length == 1 ? '1 link' : '${picked.length} links';
+    final n = trn(picked.length, '1 link', '{n} links');
     messenger.showSnackBar(
-        SnackBar(content: Text(choice.name == null ? 'Removed the sub-category from $n' : '$n added to ${choice.name}')));
+        SnackBar(content: Text(choice.name == null ? tr('Removed the sub-category from {n}', {'n': n}) : tr('{n} added to {name}', {'n': n, 'name': choice.name}))));
     _stopEditing();
   }
 
@@ -143,17 +143,17 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Delete ${picked.length == 1 ? '1 link' : '${picked.length} links'}?'),
-        content: const Text('They are removed from this folder for good.'),
+        title: Text(trn(picked.length, 'Delete 1 link?', 'Delete {n} links?')),
+        content: Text(tr('They are removed from this folder for good.')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('Cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr('Delete'))),
         ],
       ),
     );
     if (ok != true || !mounted) return;
     await state.deleteItems(picked);
-    messenger.showSnackBar(SnackBar(content: Text('Deleted ${picked.length}')));
+    messenger.showSnackBar(SnackBar(content: Text(tr('Deleted {picked}', {'picked': picked.length}))));
     _stopEditing();
   }
 
@@ -172,7 +172,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     if (folder == null) {
       return Scaffold(
         appBar: AppBar(backgroundColor: AppColors.bg),
-        body: const Center(child: Text('This folder was deleted or is no longer shared with you.')),
+        body: Center(child: Text(tr('This folder was deleted or is no longer shared with you.'))),
       );
     }
 
@@ -212,7 +212,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
               onPressed: () => showAddLinkSheet(context, folderId: folder.id),
               icon: const Icon(Icons.add_link_rounded),
               label:
-                  Text(folder.isShared ? 'Add pin' : 'Add link', style: const TextStyle(fontWeight: FontWeight.w700)),
+                  Text(folder.isShared ? tr('Add pin') : tr('Add link'), style: const TextStyle(fontWeight: FontWeight.w700)),
             )
           : null,
       body: RefreshIndicator(
@@ -239,7 +239,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: Row(children: [
-                        _chip('All', active == null, () => setState(() => _filter = null)),
+                        _chip(tr('All'), active == null, () => setState(() => _filter = null)),
                         for (final f in filters) _chip(f, active == f, () => setState(() => _filter = f)),
                       ]),
                     ),
@@ -268,8 +268,10 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                 padding: const EdgeInsets.all(32),
                 child: Text(
                   folder.canAddLinks
-                      ? 'Nothing here yet. Share a link from Instagram, YouTube or TikTok, or tap ${folder.isShared ? 'Add pin' : 'Add link'}.'
-                      : 'Nothing here yet.',
+                      ? (folder.isShared
+                          ? tr('Nothing here yet. Share a link from Instagram, YouTube or TikTok, or tap Add pin.')
+                          : tr('Nothing here yet. Share a link from Instagram, YouTube or TikTok, or tap Add link.'))
+                      : tr('Nothing here yet.'),
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: AppColors.inkSoft, height: 1.4),
                 ),
@@ -283,7 +285,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                   child: Row(children: [
                     Icon(Icons.push_pin_rounded, size: 17, color: color),
                     const SizedBox(width: 6),
-                    Text('Pinned', style: headStyle(15)),
+                    Text(tr('Pinned'), style: headStyle(15)),
                     const SizedBox(width: 8),
                     Text('${pinned.length}',
                         style: const TextStyle(color: AppColors.inkFaint, fontWeight: FontWeight.w700)),
@@ -463,7 +465,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                 }
               }),
               style: TextButton.styleFrom(minimumSize: const Size(0, 40)),
-              child: Text(everything ? 'Select none' : 'Select all'),
+              child: Text(everything ? tr('Select none') : tr('Select all')),
             ),
             Expanded(
               child: Text(
@@ -477,7 +479,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
             TextButton(
               onPressed: _stopEditing,
               style: TextButton.styleFrom(minimumSize: const Size(0, 40)),
-              child: const Text('Done', style: TextStyle(fontWeight: FontWeight.w800)),
+              child: Text(tr('Done'), style: TextStyle(fontWeight: FontWeight.w800)),
             ),
           ]),
           if (!none) ...[
@@ -488,7 +490,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                   onPressed: () => _moveSelected(folder, picked),
                   style: OutlinedButton.styleFrom(minimumSize: compact),
                   icon: const Icon(Icons.drive_file_move_outline, size: 18),
-                  label: const Text('Move'),
+                  label: Text(tr('Move')),
                 ),
               ),
               const SizedBox(width: 10),
@@ -497,7 +499,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                   onPressed: () => _tagSelected(picked),
                   style: OutlinedButton.styleFrom(minimumSize: compact),
                   icon: const Icon(Icons.sell_outlined, size: 18),
-                  label: const Text('Tag', maxLines: 1),
+                  label: Text(tr('Tag'), maxLines: 1),
                 ),
               ),
               const SizedBox(width: 10),
@@ -506,7 +508,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                   onPressed: () => _deleteSelected(picked),
                   style: FilledButton.styleFrom(minimumSize: compact, backgroundColor: const Color(0xFFC0392B)),
                   icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                  label: const Text('Delete'),
+                  label: Text(tr('Delete')),
                 ),
               ),
             ]),
@@ -558,16 +560,16 @@ class _Hero extends StatelessWidget {
   final List<Member> members;
 
   String get _subtitle {
-    final done = pinnedCount > 0 ? ' · $pinnedCount pinned' : '';
+    final done = pinnedCount > 0 ? tr(' · {pinnedCount} pinned', {'pinnedCount': pinnedCount}) : '';
     if (!folder.isShared) {
-      return '${count == 1 ? '1 link' : '$count links'}$done';
+      return '${trn(count, '1 link', '{n} links')}$done';
     }
     final others = members.where((m) => m.userId != meId).map((m) => m.displayName).toList();
-    final pins = '${count == 1 ? '1 pin' : '$count pins'}$done';
-    if (others.isEmpty) return '$pins · only you so far';
+    final pins = '${trn(count, '1 pin', '{n} pins')}$done';
+    if (others.isEmpty) return tr('{pins} · only you so far', {'pins': pins});
     final names =
         others.length <= 2 ? others.join(' & ') : '${others.take(others.length - 1).join(', ')} & ${others.last}';
-    return '$pins · shared with $names';
+    return tr('{pins} · shared with {names}', {'pins': pins, 'names': names});
   }
 
   @override
@@ -591,16 +593,16 @@ class _Hero extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          roundButton(Icons.arrow_back_rounded, 'Back', () => Navigator.of(context).maybePop()),
+          roundButton(Icons.arrow_back_rounded, tr('Back'), () => Navigator.of(context).maybePop()),
           const Spacer(),
           if (folder.isShared && folder.isOwner)
-            roundButton(Icons.person_add_alt_1_rounded, 'Invite', () => showInviteSheet(context, folder)),
+            roundButton(Icons.person_add_alt_1_rounded, tr('Invite'), () => showInviteSheet(context, folder)),
           if (onMassEdit != null)
-            roundButton(editing ? Icons.close_rounded : Icons.checklist_rounded, editing ? 'Done editing' : 'Select',
+            roundButton(editing ? Icons.close_rounded : Icons.checklist_rounded, editing ? tr('Done editing') : tr('Select'),
                 onMassEdit!),
           if (!folder.isUncategorized && folder.isOwner && !editing) ...[
             const SizedBox(width: 8),
-            roundButton(Icons.edit_rounded, 'Edit', () => showAddFolderSheet(context, editing: folder)),
+            roundButton(Icons.edit_rounded, tr('Edit'), () => showAddFolderSheet(context, editing: folder)),
           ],
         ]),
         const SizedBox(height: 22),
@@ -621,7 +623,7 @@ class _Hero extends StatelessWidget {
         ]),
         if (folder.isShared && !folder.canAddLinks) ...[
           const SizedBox(height: 10),
-          Text('You can view this board',
+          Text(tr('You can view this board'),
               style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12.5)),
         ],
       ]),

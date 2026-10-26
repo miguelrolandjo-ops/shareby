@@ -8,6 +8,7 @@ import 'screens/home_screen.dart';
 import 'screens/inbox_screen.dart';
 import 'screens/search_screen.dart';
 import 'sheets/add_link_sheet.dart';
+import '../l10n/l10n.dart';
 
 /// Bottom-nav shell. Tabs keep their state (IndexedStack); folders and boards open
 /// as routes on top, so Back always lands on the tab you came from.
@@ -87,9 +88,9 @@ class _RootShellState extends State<RootShell> with WidgetsBindingObserver {
         selectedIndex: _index,
         onDestinationSelected: _go,
         destinations: [
-          const NavigationDestination(
-              icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Home'),
-          const NavigationDestination(icon: Icon(Icons.search_rounded), label: 'Search'),
+          NavigationDestination(
+              icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: tr('Home')),
+          NavigationDestination(icon: Icon(Icons.search_rounded), label: tr('Search')),
           NavigationDestination(
             icon: Badge(
               isLabelVisible: waiting > 0,
@@ -101,10 +102,10 @@ class _RootShellState extends State<RootShell> with WidgetsBindingObserver {
               label: Text('$waiting'),
               child: const Icon(Icons.notifications_rounded),
             ),
-            label: 'New',
+            label: tr('New'),
           ),
-          const NavigationDestination(
-              icon: Icon(Icons.group_outlined), selectedIcon: Icon(Icons.group_rounded), label: 'Friends'),
+          NavigationDestination(
+              icon: Icon(Icons.group_outlined), selectedIcon: Icon(Icons.group_rounded), label: tr('Friends')),
         ],
       ),
     );

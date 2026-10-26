@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:     # Material's own labels (copy/paste, dialogs) in Indonesian
+    sdk: flutter
   provider: ^6.1.2           # app state (ChangeNotifier)
   sqflite: ^2.4.1            # on-device database: the offline source of truth
   path: ^1.9.0

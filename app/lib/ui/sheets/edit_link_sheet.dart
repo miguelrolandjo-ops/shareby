@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../data/models.dart';
 import '../../state/app_state.dart';
 import '../helpers.dart';
+import '../../l10n/l10n.dart';
 
 /// Edit a saved link's title and address. Changing the address looks the page up again.
 Future<void> showEditLinkSheet(BuildContext context, Item item) =>
@@ -52,8 +53,8 @@ class _EditLinkSheetState extends State<_EditLinkSheet> {
   @override
   Widget build(BuildContext context) {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-      const SheetTitle('Edit link', subtitle: 'Change the title or the address.'),
-      const FieldLabel('Link'),
+      SheetTitle(tr('Edit link'), subtitle: tr('Change the title or the address.')),
+      FieldLabel(tr('Link')),
       TextField(
         controller: _url,
         keyboardType: TextInputType.url,
@@ -64,15 +65,15 @@ class _EditLinkSheetState extends State<_EditLinkSheet> {
         },
       ),
       const SizedBox(height: 8),
-      const FieldLabel('Title'),
+      FieldLabel(tr('Title')),
       TextField(
         controller: _title,
         textCapitalization: TextCapitalization.sentences,
-        decoration: const InputDecoration(hintText: 'What is this?'),
+        decoration: InputDecoration(hintText: tr('What is this?')),
         onSubmitted: (_) => _saving ? null : _save(),
       ),
       const SizedBox(height: 16),
-      FilledButton(onPressed: _saving ? null : _save, child: Text(_saving ? 'Saving...' : 'Save changes')),
+      FilledButton(onPressed: _saving ? null : _save, child: Text(_saving ? 'Saving...' : tr('Save changes'))),
     ]);
   }
 }

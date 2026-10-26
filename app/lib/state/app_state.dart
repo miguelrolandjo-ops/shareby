@@ -12,11 +12,15 @@ import '../data/platforms.dart';
 import '../data/refactor_planner.dart';
 import '../data/refactor_undo.dart';
 import '../data/repository.dart';
+import '../data/regions.dart';
 import '../data/session_store.dart';
+import '../data/settings_store.dart';
+import '../data/sources.dart';
 import '../data/share_intake.dart';
 import '../data/sync_service.dart';
 import '../data/title_fetcher.dart';
 import '../data/url_utils.dart';
+import '../l10n/l10n.dart';
 
 /// What the sync indicator shows.
 enum SyncState {
@@ -41,6 +45,7 @@ class AppState extends ChangeNotifier {
     required this.sessions,
     required this.api,
     required this.shareIntake,
+    required this.settings,
   });
 
   final LocalDb db;
@@ -50,12 +55,16 @@ class AppState extends ChangeNotifier {
   final SessionStore sessions;
   final ApiClient api;
   final ShareIntake shareIntake;
+  final SettingsStore settings;
 
   List<Folder> _folders = const [];
   List<Item> _items = const [];
   List<Member> _members = const [];
 
   SyncState syncState = SyncState.localOnly;
+
+  /// True while a pull-to-refresh is working in the background (the thin bar at the top).
+  bool refreshing = false;
   String? syncMessage;
   DateTime? lastSyncedAt;
   int pendingChanges = 0;
@@ -123,7 +132,8 @@ class AppState extends ChangeNotifier {
   // ------------------------------------------------------------ lifecycle
 
   Future<void> init() async {
-    await repo.seedIfNeeded();
+    settings.apply();
+    if (settings.onboarded) await repo.seedIfNeeded();
     await repo.reclassifySources(); // the platform table may have grown since the link was saved
     await _countImpressions(force: true);
     await reload();
@@ -139,15 +149,36 @@ class AppState extends ChangeNotifier {
     await syncNow();
   }
 
-  /// Pull-to-refresh: everything above, plus a hard re-fetch of the links' pages and pictures
-  /// (every link, or only [folderId]'s when pulled inside a folder), and the newest platform
-  /// rules from the server. Waits for all of it so the spinner means something.
-  Future<void> refresh({String? folderId}) async {
-    await _ingestShares();
-    await reload();
-    await _refreshRules();
-    await _backfillPreviews(force: true, hard: true, folderId: folderId);
-    await syncNow();
+  /// Pull-to-refresh. Returns at once, so the pull spinner never blocks the list; the work
+  /// runs in the background behind a thin bar at the top ([refreshing]):
+  /// shares, the newest platform rules, links still missing a preview, then a sync.
+  /// Every link's page is no longer re-fetched; use [refetchAllPreviews] for that.
+  Future<void> refresh({String? folderId}) {
+    if (!refreshing) unawaited(_refreshInBackground(folderId: folderId, hard: false));
+    return Future<void>.value();
+  }
+
+  /// Looks every link up again (pictures, titles, authors). Slow with many links, so it is a
+  /// separate action in Profile; it runs in the background like [refresh].
+  Future<void> refetchAllPreviews() {
+    if (!refreshing) unawaited(_refreshInBackground(hard: true));
+    return Future<void>.value();
+  }
+
+  Future<void> _refreshInBackground({String? folderId, required bool hard}) async {
+    refreshing = true;
+    _notify();
+    try {
+      await _ingestShares();
+      await Future.wait([
+        _refreshRules(),
+        syncNow(),
+        _backfillPreviews(force: true, hard: hard, folderId: folderId),
+      ]);
+    } finally {
+      refreshing = false;
+      _notify();
+    }
   }
 
   /// Fetches the platform and title rules from the server when it is reachable. Silent: the
@@ -202,10 +233,20 @@ class AppState extends ChangeNotifier {
     };
     final before = {...skip};
     try {
+      // The repository keeps several lookups in flight at once; the screen redraws at most
+      // every couple of seconds instead of after every batch.
+      var lastDraw = DateTime.now();
+      var changed = false;
       while (await repo.backfillPreviews(skip, hard: hard, folderId: folderId, ignoreAttempts: force) > 0) {
-        await reload();
-        _scheduleSync();
+        changed = true;
+        if (DateTime.now().difference(lastDraw) > const Duration(seconds: 2)) {
+          await reload();
+          lastDraw = DateTime.now();
+          changed = false;
+        }
       }
+      if (changed) await reload();
+      _scheduleSync();
     } catch (_) {
       // Previews are a nicety; never let a lookup problem surface to the user.
     } finally {
@@ -246,7 +287,7 @@ class AppState extends ChangeNotifier {
       }
     }
     if (saved > 0) {
-      _flashes.add(saved == 1 ? 'Saved 1 link from another app' : 'Saved $saved links from other apps');
+      _flashes.add(saved == 1 ? tr('Saved 1 link from another app') : tr('Saved {saved} links from other apps', {'saved': saved}));
       _scheduleSync();
       unawaited(_backfillPreviews(force: true));
     }
@@ -261,7 +302,7 @@ class AppState extends ChangeNotifier {
     _lastImpressions = now;
     final auto = await repo.registerImpressions();
     if (auto > 0) {
-      _flashes.add(auto == 1 ? '1 save was filed automatically' : '$auto saves were filed automatically');
+      _flashes.add(auto == 1 ? tr('1 save was filed automatically') : tr('{auto} saves were filed automatically', {'auto': auto}));
       _scheduleSync();
     }
   }
@@ -293,13 +334,13 @@ class AppState extends ChangeNotifier {
       case SyncOutcome.ok:
         syncState = SyncState.synced;
         lastSyncedAt = DateTime.now();
-        syncMessage = result.rejected > 0 ? '${result.rejected} change(s) were not allowed and were undone' : null;
+        syncMessage = result.rejected > 0 ? tr('{rejected} change(s) were not allowed and were undone', {'rejected': result.rejected}) : null;
       case SyncOutcome.offline:
         syncState = SyncState.offline;
         syncMessage = null;
       case SyncOutcome.sessionExpired:
         await _signOutLocally();
-        _flashes.add('Your session expired. Sign in again to keep syncing.');
+        _flashes.add(tr('Your session expired. Sign in again to keep syncing.'));
       case SyncOutcome.error:
         syncState = SyncState.error;
         syncMessage = result.message;
@@ -444,6 +485,74 @@ class AppState extends ChangeNotifier {
     syncMessage = null;
     lastSyncedAt = null;
   }
+
+  // ----------------------------------------------------------- settings
+
+  bool get needsOnboarding => !settings.onboarded;
+  Region get region => settings.region;
+  AppLanguage get language => L10n.current;
+
+  /// First run: region, language and sources, then the demo collections (in that language).
+  Future<void> completeOnboarding({
+    required Region region,
+    required AppLanguage language,
+    required Set<String> sources,
+  }) async {
+    await settings.setRegion(region.code);
+    await settings.setLanguage(language);
+    await settings.setEnabledSources(sources);
+    settings.apply();
+    await repo.seedIfNeeded();
+    await reload();
+  }
+
+  Future<void> setLanguage(AppLanguage language) async {
+    await settings.setLanguage(language);
+    settings.apply();
+    _notify();
+  }
+
+  /// Changes the region; [resetSources] switches on that region's usual sources.
+  Future<void> setRegion(Region region, {bool resetSources = false}) async {
+    await settings.setRegion(region.code);
+    if (resetSources) await settings.setEnabledSources(region.sources.toSet());
+    settings.apply();
+    _notify();
+  }
+
+  Future<void> setSourceEnabled(String key, bool on) async {
+    final enabled = {...(settings.enabledSources ?? SourceCatalog.current.builtIns.map((s) => s.key).toSet())};
+    on ? enabled.add(key) : enabled.remove(key);
+    await settings.setEnabledSources(enabled);
+    settings.apply();
+    _notify();
+  }
+
+  /// Adds a source the app doesn't know (a news site, a local shop). Throws [StateError]
+  /// with a message to show when the name or link isn't usable.
+  Future<CustomSource> addCustomSource({required String name, required String exampleUrl}) async {
+    final error = SourceCatalog.current.validate(name, exampleUrl);
+    if (error != null) throw StateError(error);
+    final source = CustomSource(
+      id: DateTime.now().microsecondsSinceEpoch.toRadixString(36),
+      name: name.trim(),
+      host: CustomSource.hostOf(exampleUrl)!,
+      exampleUrl: exampleUrl.trim(),
+    );
+    await settings.setCustomSources([...settings.customSources, source]);
+    settings.apply();
+    _notify();
+    return source;
+  }
+
+  Future<void> removeCustomSource(CustomSource source) async {
+    await settings.setCustomSources([for (final c in settings.customSources) if (c.id != source.id) c]);
+    settings.apply();
+    _notify();
+  }
+
+  /// Undo for a quick confirm: puts the link back exactly as it was.
+  Future<void> restoreItem(Item previous) => _mutate(() => repo.restoreItem(previous));
 
   void _notify() {
     if (!_disposed) notifyListeners();

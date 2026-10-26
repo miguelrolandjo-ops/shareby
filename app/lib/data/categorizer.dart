@@ -8,6 +8,7 @@
 library;
 
 import 'platforms.dart';
+import 'sources.dart';
 
 class Suggestion {
   const Suggestion(this.folderId, this.confidence);
@@ -18,17 +19,21 @@ class Suggestion {
 }
 
 class CategoryCandidate {
-  const CategoryCandidate({required this.id, required this.name, this.examples = const []});
+  const CategoryCandidate({required this.id, required this.name, this.examples = const [], this.exampleSources = const []});
 
   final String id;
   final String name;
 
   /// Titles of items already confirmed in this folder.
   final List<String> examples;
+
+  /// Where those items came from (source keys, custom sources included), for the source signal.
+  final List<String> exampleSources;
 }
 
 abstract class Categorizer {
-  Suggestion suggest(String text, List<CategoryCandidate> candidates);
+  /// [source] is where the new link comes from (see SourceCatalog.keyForUrl).
+  Suggestion suggest(String text, List<CategoryCandidate> candidates, {String? source});
 }
 
 class KeywordCategorizer implements Categorizer {
@@ -64,8 +69,11 @@ class KeywordCategorizer implements Categorizer {
   /// Platform names ("linkedin", "pinterest"...) say where a link is from, not what it is about.
   /// Names that are also everyday words are left out so a "Medium" or "Maps" folder still works.
   static const _everydayWords = {'medium', 'maps', 'notion', 'grab'};
-  static Set<String> get _platformWords =>
-      {for (final p in PlatformRules.current.platforms) if (!_everydayWords.contains(p.key)) p.key};
+  static Set<String> get _platformWords => {
+        for (final p in PlatformRules.current.platforms)
+          if (!_everydayWords.contains(p.key)) p.key,
+        ...SourceCatalog.current.customWords, // the user's own sources name a site, not a topic
+      };
   static final _url = RegExp(r'https?://[^\s<>"]+', caseSensitive: false);
 
   /// Drops links before scoring. A link to a social post is just an id; any other link keeps
@@ -113,12 +121,29 @@ class KeywordCategorizer implements Categorizer {
     return t;
   }
 
+  /// A folder is "where this source goes" once at least this many of its links exist and
+  /// [_sourceShare] of them come from one source that no other folder is dominated by
+  /// (all your Spotify links in Music, all Shopee links in Wishlist).
+  static const _sourceMinExamples = 3;
+  static const _sourceShare = 0.6;
+
   @override
-  Suggestion suggest(String text, List<CategoryCandidate> candidates) {
+  Suggestion suggest(String text, List<CategoryCandidate> candidates, {String? source}) {
     final tokens = tokenize(_withoutSocialUrls(text));
-    if (tokens.isEmpty || candidates.isEmpty) return const Suggestion(null, 0);
+    if (candidates.isEmpty) return const Suggestion(null, 0);
 
     final profiles = [for (final c in candidates) _Profile(c)];
+    String? sourceFolder;
+    if (source != null && source != PlatformRules.web) {
+      final dominated = [
+        for (final p in profiles)
+          if (p.candidate.exampleSources.length >= _sourceMinExamples &&
+              (p.sourceCounts[source] ?? 0) / p.candidate.exampleSources.length >= _sourceShare)
+            p.candidate.id,
+      ];
+      if (dominated.length == 1) sourceFolder = dominated.single;
+    }
+    if (tokens.isEmpty && sourceFolder == null) return const Suggestion(null, 0);
     // A word that shows up in several folders' examples says little about any one of them.
     final exampleFolders = <String, int>{};
     for (final p in profiles) {
@@ -131,7 +156,7 @@ class KeywordCategorizer implements Categorizer {
     var best = 0.0;
     var second = 0.0;
     for (final p in profiles) {
-      final score = _score(tokens, p, exampleFolders);
+      final score = _score(tokens, p, exampleFolders, sourceMatch: p.candidate.id == sourceFolder);
       if (score > best) {
         second = best;
         best = score;
@@ -148,10 +173,14 @@ class KeywordCategorizer implements Categorizer {
     return confidence >= threshold ? Suggestion(bestId, confidence) : Suggestion(null, confidence);
   }
 
-  double _score(Set<String> tokens, _Profile p, Map<String, int> exampleFolders) {
+  double _score(Set<String> tokens, _Profile p, Map<String, int> exampleFolders, {bool sourceMatch = false}) {
     var score = 0.0;
     var strongHits = 0; // matches on the folder's name, or a word learned from its saves
     var exampleHits = 0;
+    if (sourceMatch) {
+      score += 0.8;
+      strongHits++;
+    }
     for (final t in tokens) {
       if (p.nameTokens.contains(t)) {
         score += 1.0;
@@ -183,7 +212,13 @@ class _Profile {
         exampleCounts[t] = (exampleCounts[t] ?? 0) + 1;
       }
     }
+    for (final s in candidate.exampleSources) {
+      sourceCounts[s] = (sourceCounts[s] ?? 0) + 1;
+    }
   }
+
+  /// Source key -> how many of this folder's links come from it.
+  final Map<String, int> sourceCounts = {};
 
   final CategoryCandidate candidate;
   final Set<String> nameTokens;

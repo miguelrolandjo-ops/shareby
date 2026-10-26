@@ -5,6 +5,7 @@ import '../../core/theme.dart';
 import '../../data/models.dart';
 import '../../state/app_state.dart';
 import '../helpers.dart';
+import '../../l10n/l10n.dart';
 
 const _emojis = ['📁', '🍳', '🏙️', '🌴', '☕', '🏀', '✨', '🏡', '🎬', '🛍️', '📚', '🎁'];
 
@@ -63,34 +64,34 @@ class _AddFolderSheetState extends State<_AddFolderSheet> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
-          title: Text('Delete "${folder.name}"?'),
+          title: Text(tr('Delete "{name}"?', {'name': folder.name})),
           content: folder.isShared
-              ? const Text('The board and its pins are removed for everyone in it.')
+              ? Text(tr('The board and its pins are removed for everyone in it.'))
               : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(count == 0 ? 'This folder is empty.' : 'What should happen to the $count ${count == 1 ? 'link' : 'links'} inside?'),
+                  Text(count == 0 ? tr('This folder is empty.') : trn(count, 'What should happen to the 1 link inside?', 'What should happen to the {n} links inside?')),
                   if (count > 0) ...[
                     const SizedBox(height: 8),
                     RadioGroup<bool>(
                       groupValue: keepLinks,
                       onChanged: (v) => setLocal(() => keepLinks = v ?? false),
-                      child: const Column(children: [
+                      child: Column(children: [
                         RadioListTile<bool>(
                           contentPadding: EdgeInsets.zero,
                           value: false,
-                          title: Text('Delete the links too'),
+                          title: Text(tr('Delete the links too')),
                         ),
                         RadioListTile<bool>(
                           contentPadding: EdgeInsets.zero,
                           value: true,
-                          title: Text('Keep them in Uncategorized'),
+                          title: Text(tr('Keep them in Uncategorized')),
                         ),
                       ]),
                     ),
                   ],
                 ]),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('Cancel'))),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr('Delete'))),
           ],
         ),
       ),
@@ -112,27 +113,27 @@ class _AddFolderSheetState extends State<_AddFolderSheet> {
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
       SheetTitle(
-        editing ? 'Edit ${widget.shared ? 'board' : 'folder'}' : (widget.shared ? 'New shared board' : 'New folder'),
+        editing ? 'Edit ${widget.shared ? 'board' : 'folder'}' : (widget.shared ? tr('New shared board') : tr('New folder')),
         subtitle: widget.shared
-            ? 'Friends you invite can see and add pins. Shared boards have no tags or auto-sorting.'
-            : 'New saves can be sorted into it automatically.',
+            ? tr('Friends you invite can see and add pins. Shared boards have no tags or auto-sorting.')
+            : tr('New saves can be sorted into it automatically.'),
       ),
-      const FieldLabel('Name'),
+      FieldLabel(tr('Name')),
       TextField(
         controller: _name,
         autofocus: !editing,
         textCapitalization: TextCapitalization.words,
         maxLength: 80,
         decoration: InputDecoration(
-          hintText: widget.shared ? 'e.g. Weekend Inspo' : 'e.g. Cooking',
+          hintText: widget.shared ? tr('e.g. Weekend Inspo') : 'e.g. Cooking',
           counterText: '',
-          helperText: duplicate ? 'You already have one with this name. This one will be saved as "${_name.text.trim()} (2)".' : null,
+          helperText: duplicate ? tr('You already have one with this name. This one will be saved as "{trim} (2)".', {'trim': _name.text.trim()}) : null,
           helperMaxLines: 2,
         ),
         onChanged: (_) => setState(() {}),
       ),
       const SizedBox(height: 10),
-      const FieldLabel('Icon'),
+      FieldLabel(tr('Icon')),
       Wrap(spacing: 8, runSpacing: 8, children: [
         for (final e in _emojis)
           InkWell(
@@ -152,7 +153,7 @@ class _AddFolderSheetState extends State<_AddFolderSheet> {
           ),
       ]),
       const SizedBox(height: 14),
-      const FieldLabel('Color'),
+      FieldLabel(tr('Color')),
       Row(children: [
         for (final c in FolderPalette.all)
           Padding(
@@ -175,14 +176,14 @@ class _AddFolderSheetState extends State<_AddFolderSheet> {
       const SizedBox(height: 20),
       FilledButton(
         onPressed: _saving || _name.text.trim().isEmpty ? null : _save,
-        child: Text(editing ? 'Save changes' : (widget.shared ? 'Create board' : 'Create folder')),
+        child: Text(editing ? tr('Save changes') : (widget.shared ? tr('Create board') : tr('Create folder'))),
       ),
       if (editing && widget.editing!.isOwner) ...[
         const SizedBox(height: 8),
         TextButton(
           onPressed: _delete,
           style: TextButton.styleFrom(foregroundColor: const Color(0xFFC0392B)),
-          child: Text('Delete ${widget.shared ? 'board' : 'folder'}'),
+          child: Text(widget.shared ? tr('Delete board') : tr('Delete folder')),
         ),
       ],
     ]);

@@ -5,6 +5,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'api_client.dart';
 import 'models.dart';
 import 'session_store.dart';
+import '../l10n/l10n.dart';
 
 /// What the server offers for signing in (GET /auth/config).
 class AuthOptions {
@@ -54,7 +55,7 @@ class AuthService {
 
   Future<UserSession> signInWithGoogle(AuthOptions options) async {
     final clientId = options.googleClientId;
-    if (clientId == null) throw StateError('Google sign-in is not set up on the server yet.');
+    if (clientId == null) throw StateError(tr('Google sign-in is not set up on the server yet.'));
     final google = GoogleSignIn.instance;
     if (_googleReadyFor != clientId) {
       await google.initialize(serverClientId: clientId);
@@ -72,7 +73,7 @@ class AuthService {
       throw StateError(_googleProblem(e));
     }
     final idToken = account.authentication.idToken;
-    if (idToken == null) throw StateError('Google did not return a sign-in token. Please try again.');
+    if (idToken == null) throw StateError(tr('Google did not return a sign-in token. Please try again.'));
     return _finish(await api.googleLogin(idToken), 'google');
   }
 

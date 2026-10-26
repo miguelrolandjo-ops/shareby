@@ -11,9 +11,11 @@ import 'models.dart';
 import 'refactor_planner.dart';
 import 'refactor_undo.dart';
 import 'session_store.dart';
+import 'sources.dart';
 import 'thumbnail_store.dart';
 import 'title_fetcher.dart';
 import 'url_utils.dart';
+import '../l10n/l10n.dart';
 
 /// Every change the user makes goes through here.
 ///
@@ -60,7 +62,7 @@ class Repository {
     bool isShared = false,
   }) async {
     if (isShared && !sessions.isSignedIn) {
-      throw StateError('Sign in with Google or Apple to create shared boards.');
+      throw StateError(tr('Sign in with Google or Apple to create shared boards.'));
     }
     final now = _now();
     final user = sessions.current;
@@ -158,15 +160,15 @@ class Repository {
       // match, so look up the real page title first.
       if (isFallbackTitle(cleanTitle) && (found == null || !found.reached)) found = await fetchPagePreview(url);
       final text = isFallbackTitle(cleanTitle) ? (found?.title ?? cleanTitle) : cleanTitle;
-      final suggestion = await suggestFor('$text $url');
+      final suggestion = await suggestFor('$text $url', url: url);
       target = suggestion.folderId;
       suggested = suggestion.folderId;
       confidence = suggestion.confidence;
       status = 'new';
     } else if (folderId != kUncategorizedId) {
       final folder = await db.folderById(folderId);
-      if (folder == null || folder.deleted) throw StateError('That collection no longer exists.');
-      if (!folder.canAddLinks) throw StateError('You can view this board but not add to it.');
+      if (folder == null || folder.deleted) throw StateError(tr('That collection no longer exists.'));
+      if (!folder.canAddLinks) throw StateError(tr('You can view this board but not add to it.'));
       target = folderId;
     }
 
@@ -219,7 +221,8 @@ class Repository {
   /// pictures of friends' pins are still downloaded, since that is local only.
   Future<int> backfillPreviews(
     Set<String> skip, {
-    int limit = 6,
+    int limit = 24,
+    int concurrency = 6,
     bool hard = false,
     String? folderId,
     bool ignoreAttempts = false,
@@ -244,7 +247,20 @@ class Repository {
         .take(limit)
         .toList();
     skip.addAll(todo.map((i) => i.id));
-    await Future.wait([for (final item in todo) _refreshOne(item, lookup: needsLookup(item))]);
+    // A small worker pool: a slow site holds up one worker, not the whole batch.
+    var next = 0;
+    Future<void> worker() async {
+      while (next < todo.length) {
+        final item = todo[next++];
+        try {
+          await _refreshOne(item, lookup: needsLookup(item));
+        } catch (_) {
+          // One broken page must not stop the others.
+        }
+      }
+    }
+
+    await Future.wait([for (var w = 0; w < concurrency && w < todo.length; w++) worker()]);
     return todo.length;
   }
 
@@ -322,7 +338,7 @@ class Repository {
         final item = batch[i];
         final preview = previews[i];
         final title = preview.title ?? item.title;
-        final suggestion = await suggestFor('$title ${item.url}');
+        final suggestion = await suggestFor('$title ${item.url}', url: item.url);
         final hit = suggestion.folderId != null;
         if (hit) matched++;
         await _saveItem(item.copyWith(
@@ -342,19 +358,25 @@ class Repository {
     return RetryResult(matched: matched, unmatched: stuck.length - matched);
   }
 
-  /// Auto-categorization only ever considers personal folders.
-  Future<Suggestion> suggestFor(String text) async {
+  /// Auto-categorization only ever considers personal folders. [url], when given, lets the
+  /// link's source count too (see [KeywordCategorizer.suggest]).
+  Future<Suggestion> suggestFor(String text, {String? url}) async {
     final folders = (await db.folders()).where((f) => !f.isShared).toList();
     final items = await db.items();
+    final catalog = SourceCatalog.current;
     final candidates = [
       for (final f in folders)
-        CategoryCandidate(
-          id: f.id,
-          name: f.name,
-          examples: items.where((i) => i.folderId == f.id && !i.isNew).take(25).map((i) => i.title).toList(),
-        ),
+        () {
+          final filed = items.where((i) => i.folderId == f.id && !i.isNew).take(25).toList();
+          return CategoryCandidate(
+            id: f.id,
+            name: f.name,
+            examples: [for (final i in filed) i.title],
+            exampleSources: [for (final i in filed) catalog.keyOf(i)],
+          );
+        }(),
     ];
-    return categorizer.suggest(text, candidates);
+    return categorizer.suggest(text, candidates, source: url == null ? null : catalog.keyForUrl(url));
   }
 
   /// Confirms a [New] item, optionally into a different personal folder.
@@ -464,7 +486,7 @@ class Repository {
   /// removes the ones it created (links added to those since go to Uncategorized).
   Future<int> undoRefactor() async {
     final undo = refactorUndo;
-    if (undo == null) throw StateError('There is nothing to undo, or it was more than 24 hours ago.');
+    if (undo == null) throw StateError(tr('There is nothing to undo, or it was more than 24 hours ago.'));
     final now = _now();
 
     for (final id in undo.removedFolderIds) {
@@ -508,7 +530,7 @@ class Repository {
     if (item.folderId != null) {
       final folder = await db.folderById(item.folderId!);
       if (folder != null && folder.isShared) {
-        throw StateError('Tags are only available in your personal folders.');
+        throw StateError(tr('Tags are only available in your personal folders.'));
       }
     }
     final clean = tag?.trim() ?? '';
@@ -537,6 +559,16 @@ class Repository {
     for (final item in items) {
       await setTag(item, tag);
     }
+  }
+
+  /// Puts [previous] back (e.g. undoing a quick confirm), as a fresh edit so it syncs.
+  Future<void> restoreItem(Item previous) async {
+    final current = await db.itemById(previous.id);
+    if (current == null) return;
+    await _saveItem(previous.copyWith(
+      thumbPath: current.thumbPath,
+      updatedAt: _now(),
+    ));
   }
 
   Future<void> deleteItem(Item item) async {
@@ -577,7 +609,7 @@ class Repository {
   /// editors, on shared boards, where the pin is shared with everyone. Only pin fields
   /// change, so it never conflicts with someone else's edit to the title or folder.
   Future<void> setPinned(Item item, bool pinned) async {
-    if (item.isNew) throw StateError('Confirm which folder this goes in first, then pin it.');
+    if (item.isNew) throw StateError(tr('Confirm which folder this goes in first, then pin it.'));
     await _requireCanChange(item);
     final now = _now();
     final user = sessions.current;
@@ -611,7 +643,7 @@ class Repository {
     final folder = await db.folderById(item.folderId!);
     if (folder == null || !folder.isShared) return;
     if (item.addedBy != me && folder.ownerId != me) {
-      throw StateError('Only the person who added this link can edit it.');
+      throw StateError(tr('Only the person who added this link can edit it.'));
     }
   }
 
@@ -619,7 +651,7 @@ class Repository {
     if (item.folderId == null) return;
     final folder = await db.folderById(item.folderId!);
     if (folder != null && folder.isShared && !folder.canAddLinks) {
-      throw StateError('You can view this board but not change it.');
+      throw StateError(tr('You can view this board but not change it.'));
     }
   }
 
@@ -690,6 +722,40 @@ class Repository {
         createdAt: t,
         updatedAt: t,
       ));
+    }
+
+    if (L10n.current != AppLanguage.id) {
+      // English demo for every other region.
+      final cooking = await folder('Cooking', FolderPalette.amber, '🍳');
+      final city = await folder('City Weekend', FolderPalette.sky, '🏙️');
+      final beach = await folder('Beach Trip', FolderPalette.mint, '🌴');
+      final cafe = await folder('Cafe Picks', FolderPalette.coral, '☕');
+      final sports = await folder('Workouts', FolderPalette.lilac, '🏀');
+
+      await link(cooking, 'One-pan garlic butter pasta in 15 minutes', 'https://www.instagram.com/reel/shareby-demo-1',
+          tag: 'Weeknight');
+      await link(cooking, 'No-bake cheesecake that melts in your mouth', 'https://www.tiktok.com/@shareby/video/1001',
+          tag: 'Dessert');
+      await link(cooking, 'Meal prep for the whole week on a budget', 'https://www.instagram.com/reel/shareby-demo-2');
+      await link(city, 'Rooftop bars with the best sunset views', 'https://www.instagram.com/p/shareby-demo-3',
+          done: true);
+      await link(city, 'A perfect day in the old town: full itinerary', 'https://www.youtube.com/watch?v=shareby0001',
+          tag: 'Day trip');
+      await link(beach, 'Sunrise hike worth waking up for', 'https://www.youtube.com/watch?v=shareby0002',
+          tag: 'Must do');
+      await link(beach, 'Cheap local food spots near the beach', 'https://www.instagram.com/reel/shareby-demo-4');
+      await link(cafe, 'The best iced latte in town under \$5', 'https://www.instagram.com/reel/shareby-demo-5',
+          tag: 'Budget');
+      await link(sports, '15-minute home workout, no equipment', 'https://www.instagram.com/reel/shareby-demo-6');
+
+      // Waiting in "Needs a quick look".
+      await link(cooking, 'Crispy fried chicken with a spicy chili dip', 'https://www.youtube.com/watch?v=shareby0003',
+          isNew: true);
+      await link(cafe, 'Viral dessert box you have to try', 'https://www.tiktok.com/@shareby/video/1002', isNew: true);
+      await link(city, 'Golden hour photo spots downtown', 'https://www.tiktok.com/@shareby/video/1003',
+          isNew: true, views: 1);
+      await sessions.markSeeded();
+      return;
     }
 
     final cooking = await folder('Cooking', FolderPalette.amber, '🍳');

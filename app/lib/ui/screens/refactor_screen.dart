@@ -7,6 +7,7 @@ import '../../data/refactor_planner.dart';
 import '../../data/refactor_undo.dart';
 import '../../state/app_state.dart';
 import '../helpers.dart';
+import '../../l10n/l10n.dart';
 
 /// Regroup every link into a new set of folders, in two steps:
 ///  1. Setup: optionally type some groups of your own first.
@@ -17,7 +18,7 @@ Future<bool> undoLastRefactor(AppState state, ScaffoldMessengerState messenger) 
   try {
     final n = await state.undoRefactor();
     messenger
-        .showSnackBar(SnackBar(content: Text('Undone. $n ${n == 1 ? 'link is' : 'links are'} back where they were')));
+        .showSnackBar(SnackBar(content: Text(trn(n, 'Undone. 1 link is back where it was', 'Undone. {n} links are back where they were'))));
     return true;
   } catch (e) {
     messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
@@ -27,10 +28,9 @@ Future<bool> undoLastRefactor(AppState state, ScaffoldMessengerState messenger) 
 
 String _ago(DateTime at) {
   final d = DateTime.now().difference(at);
-  if (d.inMinutes < 1) return 'just now';
-  if (d.inMinutes < 60) return '${d.inMinutes} min ago';
-  final h = d.inHours;
-  return '$h ${h == 1 ? 'hour' : 'hours'} ago';
+  if (d.inMinutes < 1) return tr('just now');
+  if (d.inMinutes < 60) return tr('{n} min ago', {'n': d.inMinutes});
+  return trn(d.inHours, '1 hour ago', '{n} hours ago');
 }
 
 class RefactorScreen extends StatefulWidget {
@@ -63,7 +63,7 @@ class _RefactorScreenState extends State<RefactorScreen> {
     final name = _input.text.trim();
     if (name.isEmpty) return;
     if (_seeds.any((s) => s.toLowerCase() == name.toLowerCase())) {
-      toast(context, 'You already added "$name"');
+      toast(context, tr('You already added "{name}"', {'name': name}));
       return;
     }
     setState(() {
@@ -99,9 +99,9 @@ class _RefactorScreenState extends State<RefactorScreen> {
     try {
       final moved = await state.applyRefactor(plan);
       messenger.showSnackBar(SnackBar(
-        content: Text('Regrouped $moved ${moved == 1 ? 'link' : 'links'}'),
+        content: Text(trn(moved, 'Regrouped 1 link', 'Regrouped {n} links')),
         duration: const Duration(seconds: 8),
-        action: SnackBarAction(label: 'Undo', onPressed: () => undoLastRefactor(state, messenger)),
+        action: SnackBarAction(label: tr('Undo'), onPressed: () => undoLastRefactor(state, messenger)),
       ));
       navigator.pop();
     } catch (e) {
@@ -122,7 +122,7 @@ class _RefactorScreenState extends State<RefactorScreen> {
       child: Scaffold(
         appBar: AppBar(
           backgroundColor: AppColors.bg,
-          title: Text(plan == null ? 'Refactor collections' : 'Review new groups', style: headStyle(20)),
+          title: Text(plan == null ? tr('Refactor collections') : tr('Review new groups'), style: headStyle(20)),
         ),
         body: plan == null ? _setup(context) : _review(context, plan),
       ),
@@ -146,11 +146,11 @@ class _RefactorScreenState extends State<RefactorScreen> {
           border: Border.all(color: AppColors.line),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Last refactor', style: TextStyle(fontWeight: FontWeight.w700)),
+          Text(tr('Last refactor'), style: TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
           Text(
-            '${_ago(undo.at)} · ${undo.linkCount} ${undo.linkCount == 1 ? 'link' : 'links'} moved. '
-            'You can undo it for 24 hours.',
+            '${_ago(undo.at)} · ${trn(undo.linkCount, '1 link moved.', '{n} links moved.')} '
+            '${tr('You can undo it for 24 hours.')}',
             style: const TextStyle(color: AppColors.inkSoft, fontSize: 13, height: 1.35),
           ),
           const SizedBox(height: 10),
@@ -158,7 +158,7 @@ class _RefactorScreenState extends State<RefactorScreen> {
             onPressed: _undoing ? null : _undo,
             style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
             icon: const Icon(Icons.undo_rounded, size: 18),
-            label: Text(_undoing ? 'Undoing...' : 'Undo changes'),
+            label: Text(_undoing ? 'Undoing...' : tr('Undo changes')),
           ),
         ]),
       );
@@ -174,17 +174,16 @@ class _RefactorScreenState extends State<RefactorScreen> {
     return ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 32), children: [
       Text(
         count == 0
-            ? 'You have no links to regroup yet.'
-            : 'Regroup all $count of your links into new folders. You review the result before anything changes.',
+            ? tr('You have no links to regroup yet.')
+            : tr('Regroup all {count} of your links into new folders. You review the result before anything changes.', {'count': count}),
         style: const TextStyle(color: AppColors.inkSoft, height: 1.4),
       ),
       if (undo != null) _undoCard(undo),
       if (folders.isNotEmpty) ...[
         const SizedBox(height: 20),
-        const FieldLabel('Your current folders'),
-        const Text(
-          'Keep a folder to make it a group again. Uncheck one you no longer want, '
-          'and its links are regrouped.',
+        FieldLabel(tr('Your current folders')),
+        Text(
+          tr('Keep a folder to make it a group again. Uncheck one you no longer want, and its links are regrouped.'),
           style: TextStyle(color: AppColors.inkSoft, fontSize: 13, height: 1.35),
         ),
         const SizedBox(height: 6),
@@ -195,19 +194,19 @@ class _RefactorScreenState extends State<RefactorScreen> {
             value: !_dropped.contains(f.id),
             onChanged: (keep) => setState(() => keep == true ? _dropped.remove(f.id) : _dropped.add(f.id)),
             title: Text('${f.emoji}  ${f.name}', maxLines: 1, overflow: TextOverflow.ellipsis),
-            subtitle: Text('${state.itemsIn(f.id).length} links'),
+            subtitle: Text(trn(state.itemsIn(f.id).length, '1 link', '{n} links')),
           ),
       ],
       const SizedBox(height: 20),
-      const FieldLabel('Add your own groups (optional)'),
+      FieldLabel(tr('Add your own groups (optional)')),
       TextField(
         controller: _input,
         textCapitalization: TextCapitalization.words,
         maxLength: 80,
         decoration: InputDecoration(
-          hintText: 'e.g. Music',
+          hintText: tr('e.g. Music'),
           counterText: '',
-          suffixIcon: IconButton(tooltip: 'Add group', icon: const Icon(Icons.add_rounded), onPressed: _addSeed),
+          suffixIcon: IconButton(tooltip: tr('Add group'), icon: const Icon(Icons.add_rounded), onPressed: _addSeed),
         ),
         onSubmitted: (_) => _addSeed(),
       ),
@@ -228,18 +227,18 @@ class _RefactorScreenState extends State<RefactorScreen> {
         FilledButton.icon(
           onPressed: count == 0 ? null : () => _propose(proposeRest: true),
           icon: const Icon(Icons.auto_awesome_rounded),
-          label: const Text('Propose groups'),
+          label: Text(tr('Propose groups')),
         )
       else ...[
         FilledButton.icon(
           onPressed: count == 0 ? null : () => _propose(proposeRest: true),
           icon: const Icon(Icons.auto_awesome_rounded),
-          label: const Text('Let AI propose the rest'),
+          label: Text(tr('Let AI propose the rest')),
         ),
         const SizedBox(height: 10),
         OutlinedButton(
           onPressed: count == 0 ? null : () => _propose(proposeRest: false),
-          child: const Text('Use only my groups'),
+          child: Text(tr('Use only my groups')),
         ),
       ],
     ]);
@@ -256,24 +255,23 @@ class _RefactorScreenState extends State<RefactorScreen> {
     return Column(children: [
       Expanded(
         child: ListView(padding: const EdgeInsets.fromLTRB(20, 4, 20, 16), children: [
-          const Text(
-            'Remove any group you don\'t want. Links in a removed group stay where they are, '
-            'and old folders are only deleted once this empties them.',
+          Text(
+            tr("Remove any group you don't want. Links in a removed group stay where they are, and old folders are only deleted once this empties them."),
             style: TextStyle(color: AppColors.inkSoft, height: 1.4),
           ),
           const SizedBox(height: 14),
           if (plan.groups.isEmpty)
-            const Padding(
+            Padding(
               padding: EdgeInsets.symmetric(vertical: 32),
-              child: Center(child: Text('No groups left. Go back to start again.')),
+              child: Center(child: Text(tr('No groups left. Go back to start again.'))),
             ),
           for (final g in plan.groups) _groupCard(g, items),
           if (staying > 0)
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Text(
-                '$staying ${staying == 1 ? 'link doesn\'t' : 'links don\'t'} fit any group and will stay where '
-                '${staying == 1 ? 'it is' : 'they are'}.',
+                trn(staying, "1 link doesn't fit any group and will stay where it is.",
+                    tr("{n} links don't fit any group and will stay where they are.")),
                 style: const TextStyle(color: AppColors.inkFaint, height: 1.4, fontSize: 13),
               ),
             ),
@@ -288,7 +286,7 @@ class _RefactorScreenState extends State<RefactorScreen> {
             OutlinedButton(
               onPressed: _applying ? null : () => setState(() => _plan = null),
               style: OutlinedButton.styleFrom(minimumSize: const Size(88, 52)),
-              child: const Text('Back'),
+              child: Text(tr('Back')),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -312,14 +310,14 @@ class _RefactorScreenState extends State<RefactorScreen> {
   /// green = proposed by Shareby, blue = typed by you.
   Widget _originTag(RefactorGroup g) {
     final (String label, Color bg, Color fg) = g.existing
-        ? ('Current folder', AppColors.amberSoft, AppColors.amberInk)
+        ? (tr('Current folder'), AppColors.amberSoft, AppColors.amberInk)
         : g.fromUser
             ? (
-                'Yours',
+                tr('Yours'),
                 FolderPalette.soft(const Color(FolderPalette.sky)),
                 FolderPalette.deep(const Color(FolderPalette.sky))
               )
-            : ('Proposed', AppColors.brandSoft, AppColors.brand);
+            : (tr('Proposed'), AppColors.brandSoft, AppColors.brand);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
@@ -349,13 +347,13 @@ class _RefactorScreenState extends State<RefactorScreen> {
           subtitle: Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Row(children: [
-              Text('${titles.length} ${titles.length == 1 ? 'link' : 'links'}', style: const TextStyle(fontSize: 12.5)),
+              Text(trn(titles.length, '1 link', '{n} links'), style: const TextStyle(fontSize: 12.5)),
               const SizedBox(width: 8),
               _originTag(g),
             ]),
           ),
           trailing: IconButton(
-            tooltip: 'Remove group',
+            tooltip: tr('Remove group'),
             icon: const Icon(Icons.close_rounded),
             onPressed: () => setState(() => _plan!.groups.remove(g)),
           ),
@@ -363,7 +361,7 @@ class _RefactorScreenState extends State<RefactorScreen> {
           expandedCrossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (titles.isEmpty)
-              const Text('No links matched this group yet.', style: TextStyle(color: AppColors.inkFaint))
+              Text(tr('No links matched this group yet.'), style: TextStyle(color: AppColors.inkFaint))
             else
               for (final t in titles.take(12))
                 Padding(
@@ -371,7 +369,7 @@ class _RefactorScreenState extends State<RefactorScreen> {
                   child: Text('• $t', maxLines: 1, overflow: TextOverflow.ellipsis),
                 ),
             if (titles.length > 12)
-              Text('and ${titles.length - 12} more', style: const TextStyle(color: AppColors.inkFaint)),
+              Text(tr('and {titles} more', {'titles': titles.length - 12}), style: const TextStyle(color: AppColors.inkFaint)),
           ],
         ),
       ),

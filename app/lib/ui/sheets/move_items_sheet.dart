@@ -6,6 +6,7 @@ import '../../data/models.dart';
 import '../../state/app_state.dart';
 import '../helpers.dart';
 import 'add_folder_sheet.dart';
+import '../../l10n/l10n.dart';
 
 /// Pick where [count] selected links should go. Returns a folder id, or [kUncategorizedId].
 /// [currentFolderId] is left out of the list since the links are already there.
@@ -27,7 +28,7 @@ class _MoveItemsSheet extends StatelessWidget {
     ].where((f) => f.id != currentFolderId);
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-      SheetTitle('Move ${count == 1 ? '1 link' : '$count links'}'),
+      SheetTitle(trn(count, 'Move 1 link', 'Move {n} links')),
       ChoiceRow(
         selected: false,
         onTap: () async {
@@ -35,11 +36,11 @@ class _MoveItemsSheet extends StatelessWidget {
           final folder = await showAddFolderSheet(context);
           if (folder != null) navigator.pop(folder.id);
         },
-        title: 'Create one yourself',
-        subtitle: 'Name a new folder',
+        title: tr('Create one yourself'),
+        subtitle: tr('Name a new folder'),
         leading: const EmojiBadge(emoji: '✏️', color: Color(FolderPalette.grey)),
       ),
-      const FieldLabel('Move to'),
+      FieldLabel(tr('Move to')),
       for (final f in folders)
         ChoiceRow(
           selected: false,

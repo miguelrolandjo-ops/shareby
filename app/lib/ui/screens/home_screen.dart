@@ -13,6 +13,8 @@ import '../widgets/common.dart';
 import 'group_detail_screen.dart';
 import 'refactor_screen.dart';
 import 'profile_screen.dart';
+import '../../data/sources.dart';
+import '../../l10n/l10n.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key, required this.onOpenSearch, required this.onOpenInbox});
@@ -31,7 +33,7 @@ class HomeScreen extends StatelessWidget {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => pasteFromClipboard(context),
         icon: const Icon(Icons.content_paste_rounded),
-        label: const Text('Paste link', style: TextStyle(fontWeight: FontWeight.w700)),
+        label: Text(tr('Paste link'), style: TextStyle(fontWeight: FontWeight.w700)),
       ),
       body: SafeArea(
         bottom: false,
@@ -47,8 +49,8 @@ class HomeScreen extends StatelessWidget {
               _SearchEntry(onTap: onOpenSearch),
               if (newItems.isNotEmpty) ...[
                 const SizedBox(height: 24),
-                SectionTitle('Needs a quick look',
-                    trailing: TextButton(onPressed: onOpenInbox, child: Text('See all (${newItems.length})'))),
+                SectionTitle(tr('Needs a quick look'),
+                    trailing: TextButton(onPressed: onOpenInbox, child: Text(tr('See all ({newItems})', {'newItems': newItems.length})))),
                 SizedBox(
                   height: 236,
                   child: ListView.separated(
@@ -60,7 +62,7 @@ class HomeScreen extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 24),
-              const SectionTitle('Your collections'),
+              SectionTitle(tr('Your collections')),
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -271,18 +273,18 @@ class _Header extends StatelessWidget {
       const SizedBox(width: 12),
       Expanded(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(name == null ? 'Hi there' : 'Hi, ${name.split(' ').first}', style: headStyle(22)),
+          Text(name == null ? tr('Hi there') : 'Hi, ${name.split(' ').first}', style: headStyle(22)),
           const SizedBox(height: 2),
           Text(
             waiting == 0
-                ? 'All caught up'
-                : (waiting == 1 ? '1 save needs a quick look' : '$waiting saves need a quick look'),
+                ? tr('All caught up')
+                : (waiting == 1 ? tr('1 save needs a quick look') : tr('{waiting} saves need a quick look', {'waiting': waiting})),
             style: const TextStyle(color: AppColors.inkSoft, fontSize: 13),
           ),
         ]),
       ),
       IconButton(
-        tooltip: 'Settings',
+        tooltip: tr('Settings'),
         onPressed: openProfile,
         icon: const Icon(Icons.settings_outlined, color: AppColors.inkSoft),
       ),
@@ -302,12 +304,12 @@ class _SearchEntry extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
         onTap: onTap,
-        child: const Padding(
+        child: Padding(
           padding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
           child: Row(children: [
             Icon(Icons.search_rounded, color: AppColors.inkFaint),
             SizedBox(width: 10),
-            Text('Search your saves', style: TextStyle(color: AppColors.inkFaint)),
+            Text(tr('Search your saves'), style: TextStyle(color: AppColors.inkFaint)),
           ]),
         ),
       ),
@@ -339,7 +341,7 @@ class _NewItemCard extends StatelessWidget {
               child: Stack(fit: StackFit.expand, children: [
                 LinkThumbnail(item: item, color: color, radius: 0),
                 const Positioned(left: 8, top: 8, child: NewPill()),
-                Positioned(right: 8, top: 8, child: SourcePill(item.source)),
+                Positioned(right: 8, top: 8, child: SourcePill(SourceCatalog.current.keyOf(item))),
               ]),
             ),
             Expanded(
@@ -363,9 +365,9 @@ class _NewItemCard extends StatelessWidget {
                         onPressed: () async {
                           final messenger = ScaffoldMessenger.of(context);
                           await state.confirmItem(item);
-                          messenger.showSnackBar(SnackBar(content: Text('Filed in ${folder.name}')));
+                          messenger.showSnackBar(SnackBar(content: Text(tr('Filed in {name}', {'name': folder.name}))));
                         },
-                        child: const Text('Confirm', style: TextStyle(fontSize: 12.5)),
+                        child: Text(tr('Confirm'), style: TextStyle(fontSize: 12.5)),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -373,7 +375,7 @@ class _NewItemCard extends StatelessWidget {
                       child: OutlinedButton(
                         style: OutlinedButton.styleFrom(minimumSize: const Size(0, 34), padding: EdgeInsets.zero),
                         onPressed: () => showConfirmItemSheet(context, item),
-                        child: const Text('Change', style: TextStyle(fontSize: 12.5)),
+                        child: Text(tr('Change'), style: TextStyle(fontSize: 12.5)),
                       ),
                     ),
                   ]),
@@ -402,10 +404,10 @@ class _NewFolderCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: AppColors.line, width: 2),
           ),
-          child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(Icons.add_rounded, size: 28, color: AppColors.brand),
             SizedBox(height: 6),
-            Text('New folder', style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.brand)),
+            Text(tr('New folder'), style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.brand)),
           ]),
         ),
       ),
@@ -428,11 +430,11 @@ class _RefactorCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: AppColors.line, width: 2),
           ),
-          child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(Icons.auto_awesome_rounded, size: 26, color: AppColors.brand),
             SizedBox(height: 6),
-            Text('Refactor', style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.brand)),
-            Text('Regroup all links', style: TextStyle(fontSize: 12, color: AppColors.inkSoft)),
+            Text(tr('Refactor'), style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.brand)),
+            Text(tr('Regroup all links'), style: TextStyle(fontSize: 12, color: AppColors.inkSoft)),
           ]),
         ),
       ),

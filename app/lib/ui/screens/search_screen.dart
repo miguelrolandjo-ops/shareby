@@ -10,25 +10,27 @@ import '../sheets/confirm_item_sheet.dart';
 import '../sheets/item_actions_sheet.dart';
 import '../sheets/item_detail_dialog.dart';
 import '../widgets/item_tiles.dart';
+import '../../data/sources.dart';
+import '../../l10n/l10n.dart';
 
 enum _Sort { newest, oldest, title, mostViewed }
 
 enum _DateRange { any, today, week, month, year }
 
-const _sortLabels = {
-  _Sort.newest: 'Newest first',
-  _Sort.oldest: 'Oldest first',
-  _Sort.title: 'Title A–Z',
-  _Sort.mostViewed: 'Most viewed',
-};
+Map<_Sort, String> get _sortLabels => {
+      _Sort.newest: tr('Newest first'),
+      _Sort.oldest: tr('Oldest first'),
+      _Sort.title: tr('Title A–Z'),
+      _Sort.mostViewed: tr('Most viewed'),
+    };
 
-const _dateLabels = {
-  _DateRange.any: 'Any time',
-  _DateRange.today: 'Today',
-  _DateRange.week: 'Past 7 days',
-  _DateRange.month: 'Past 30 days',
-  _DateRange.year: 'Past year',
-};
+Map<_DateRange, String> get _dateLabels => {
+      _DateRange.any: tr('Any time'),
+      _DateRange.today: tr('Today'),
+      _DateRange.week: tr('Past 7 days'),
+      _DateRange.month: tr('Past 30 days'),
+      _DateRange.year: tr('Past year'),
+    };
 
 /// Searches titles, links, tags and folder names on the device, so it works offline.
 /// With no query or filter it lists every link, newest first, as a grid.
@@ -93,8 +95,8 @@ class _SearchScreenState extends State<SearchScreen> {
     var date = _date;
     var sources = {..._sources};
     final options = [
-      for (final p in PlatformRules.current.platforms) (p.key, p.name),
-      (PlatformRules.web, 'Web'),
+      for (final s in SourceCatalog.current.filterOptions) (s.key, s.name),
+      (PlatformRules.web, tr('Web')),
     ];
     final apply = await showModalBottomSheet<bool>(
       context: context,
@@ -105,13 +107,13 @@ class _SearchScreenState extends State<SearchScreen> {
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Date added', style: headStyle(16)),
+              Text(tr('Date added'), style: headStyle(16)),
               const SizedBox(height: 8),
               Wrap(spacing: 8, runSpacing: 8, children: [
                 for (final d in _DateRange.values) _chip(_dateLabels[d]!, date == d, () => setSheet(() => date = d)),
               ]),
               const SizedBox(height: 18),
-              Text('Source', style: headStyle(16)),
+              Text(tr('Source'), style: headStyle(16)),
               const SizedBox(height: 8),
               Wrap(spacing: 8, runSpacing: 8, children: [
                 for (final (key, name) in options)
@@ -126,11 +128,11 @@ class _SearchScreenState extends State<SearchScreen> {
                       date = _DateRange.any;
                       sources = {};
                     }),
-                    child: const Text('Clear'),
+                    child: Text(tr('Clear')),
                   ),
                 ),
                 const SizedBox(width: 10),
-                Expanded(child: FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Apply'))),
+                Expanded(child: FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(tr('Apply')))),
               ]),
             ]),
           ),
@@ -171,7 +173,7 @@ class _SearchScreenState extends State<SearchScreen> {
     final results = state.allItems.where((item) {
       if (_pinnedOnly && !item.isPinned) return false;
       if (since != null && item.createdAt.isBefore(since)) return false;
-      if (_sources.isNotEmpty && !_sources.contains(item.source)) return false;
+      if (_sources.isNotEmpty && !_sources.contains(SourceCatalog.current.keyOf(item))) return false;
       if (words.isEmpty) return true;
       final folder = state.folderById(item.folderId ?? kUncategorizedId);
       final haystack = [item.title, item.url, item.tag ?? '', folder?.name ?? '', item.addedByName ?? '']
@@ -245,13 +247,13 @@ class _SearchScreenState extends State<SearchScreen> {
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate([
-                      Text('Search', style: headStyle(26)),
+                      Text(tr('Search'), style: headStyle(26)),
                       const SizedBox(height: 12),
                       TextField(
                         controller: _query,
                         textInputAction: TextInputAction.search,
                         decoration: InputDecoration(
-                          hintText: 'Try "sambal", "bali" or a friend\'s name',
+                          hintText: tr('Try "sambal", "bali" or a friend\'s name'),
                           prefixIcon: const Icon(Icons.search_rounded),
                           fillColor: AppColors.surface,
                           suffixIcon: _query.text.isEmpty
@@ -267,17 +269,17 @@ class _SearchScreenState extends State<SearchScreen> {
                       SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
                         child: Row(children: [
-                          _chip('Pinned', _pinnedOnly, () => setState(() => _pinnedOnly = !_pinnedOnly),
+                          _chip(tr('Pinned'), _pinnedOnly, () => setState(() => _pinnedOnly = !_pinnedOnly),
                               icon: Icons.push_pin_rounded),
                           const SizedBox(width: 8),
                           _chip('Sort: ${_sortLabels[_sort]}', _sort != _Sort.newest, _pickSort,
                               icon: Icons.sort_rounded),
                           const SizedBox(width: 8),
-                          _chip(_filterCount == 0 ? 'Filter' : 'Filter ($_filterCount)', _filterCount > 0, _pickFilter,
+                          _chip(_filterCount == 0 ? tr('Filter') : 'Filter ($_filterCount)', _filterCount > 0, _pickFilter,
                               icon: Icons.filter_list_rounded),
                           const SizedBox(width: 8),
                           IconButton(
-                            tooltip: _grid ? 'Show as list' : 'Show as grid',
+                            tooltip: _grid ? tr('Show as list') : tr('Show as grid'),
                             onPressed: () => setState(() => _grid = !_grid),
                             icon: Icon(_grid ? Icons.view_list_rounded : Icons.grid_view_rounded),
                           ),
@@ -291,7 +293,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     child: Padding(
                       padding: const EdgeInsets.only(top: 30),
                       child: Text(
-                        filtering ? 'Nothing matches. Try a shorter word or clear a filter.' : 'No links saved yet.',
+                        filtering ? tr('Nothing matches. Try a shorter word or clear a filter.') : tr('No links saved yet.'),
                         textAlign: TextAlign.center,
                         style: const TextStyle(color: AppColors.inkSoft),
                       ),

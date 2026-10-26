@@ -19,6 +19,19 @@ import java.net.URL
  */
 class ShareReceiverActivity : Activity() {
 
+    /**
+     * The language chosen in Shareby (Profile > Region & language), which the Flutter side
+     * stores as "app_language" in shared_preferences ("flutter." prefix). Before onboarding,
+     * the phone's own language decides.
+     */
+    private val indonesian: Boolean by lazy {
+        val chosen = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
+            .getString("flutter.app_language", null)
+        (chosen ?: java.util.Locale.getDefault().language).let { it == "id" || it == "in" }
+    }
+
+    private fun t(english: String, indonesian: String) = if (this.indonesian) indonesian else english
+
     private val urlPattern = Regex("https?://[^\\s<>\"]+", RegexOption.IGNORE_CASE)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -27,7 +40,7 @@ class ShareReceiverActivity : Activity() {
         val text = intent?.getStringExtra(Intent.EXTRA_TEXT)
         val url = text?.let { urlPattern.find(it)?.value?.trimEnd('.', ',', ')', '!', '?', ';', ':') }
         if (url.isNullOrEmpty()) {
-            Toast.makeText(applicationContext, "Shareby can only save links", Toast.LENGTH_SHORT).show()
+            Toast.makeText(applicationContext, t("Shareby can only save links", "Shareby hanya bisa menyimpan link"), Toast.LENGTH_SHORT).show()
             finish()
             return
         }
@@ -39,19 +52,19 @@ class ShareReceiverActivity : Activity() {
         // Buttons always act immediately. If the page title has already arrived it is saved
         // with the link; if not, the app looks the title up itself once it has the link.
         val dialog = AlertDialog.Builder(this)
-            .setTitle("Save to Shareby")
+            .setTitle(t("Save to Shareby", "Simpan ke Shareby"))
             .setMessage(sharedTitle?.take(140) ?: url.take(140))
-            .setPositiveButton("Save") { _, _ ->
+            .setPositiveButton(t("Save", "Simpan")) { _, _ ->
                 ShareInbox.add(applicationContext, url, caption, choose = false)
-                Toast.makeText(applicationContext, "Saved to Shareby. We'll sort it for you", Toast.LENGTH_SHORT).show()
+                Toast.makeText(applicationContext, t("Saved to Shareby. We'll sort it for you", "Tersimpan di Shareby. Nanti kami sortirkan"), Toast.LENGTH_SHORT).show()
                 finish()
             }
-            .setNeutralButton("Choose collection") { _, _ ->
+            .setNeutralButton(t("Choose collection", "Pilih koleksi")) { _, _ ->
                 ShareInbox.add(applicationContext, url, caption, choose = true)
                 startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 finish()
             }
-            .setNegativeButton("Cancel") { _, _ -> finish() }
+            .setNegativeButton(t("Cancel", "Batal")) { _, _ -> finish() }
             .setOnCancelListener { finish() }
             .show()
 
