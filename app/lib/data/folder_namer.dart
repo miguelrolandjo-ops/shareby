@@ -5,6 +5,8 @@
 /// already have fits (e.g. they have "Music"), that one is reused instead.
 library;
 
+import 'categorizer.dart';
+
 class FolderProposal {
   const FolderProposal({required this.name, required this.emoji, this.existingId});
 
@@ -96,6 +98,18 @@ class FolderNamer {
       'dessert',
       'cheesecake',
       'homemade',
+      'dinner',
+      'lunch',
+      'breakfast',
+      'pasta',
+      'chicken',
+      'soup',
+      'salad',
+      'meal prep',
+      'air fryer',
+      'cookie',
+      'bread',
+      'ingredient',
     ], [
       'cook',
       'resep',
@@ -115,6 +129,12 @@ class FolderNamer {
       'ramen',
       'sushi',
       'buffet',
+      'food spot',
+      'where to eat',
+      'must try',
+      'hidden gem',
+      'eatery',
+      'bistro',
     ], [
       'food',
       'makan',
@@ -155,6 +175,13 @@ class FolderNamer {
       'korea trip',
       'backpacker',
       'destinasi',
+      'vacation',
+      'holiday',
+      'road trip',
+      'things to do',
+      'resort',
+      'airbnb',
+      'sightseeing',
     ], [
       'trip',
       'wisata',
@@ -175,6 +202,11 @@ class FolderNamer {
       'cardio',
       'stretching',
       'diet',
+      'exercise',
+      'abs',
+      'weight loss',
+      'strength',
+      'protein',
     ], [
       'sport',
       'olahraga',
@@ -190,6 +222,12 @@ class FolderNamer {
       'hijab',
       'dress',
       'streetwear',
+      'jacket',
+      'jeans',
+      'shoe',
+      'haul',
+      'lookbook',
+      'what i wore',
     ], [
       'inspo',
       'style'
@@ -203,6 +241,11 @@ class FolderNamer {
       'tutorial makeup',
       'haircare',
       'hair',
+      'nail',
+      'nail art',
+      'sunscreen',
+      'perfume',
+      'fragrance',
     ], [
       'inspo',
       'style'
@@ -220,6 +263,10 @@ class FolderNamer {
       'ai',
       'chatgpt',
       'review hp',
+      'smartphone',
+      'desk setup',
+      'keyboard',
+      'pc build',
     ]),
     _Topic('Gaming', '🎮', [
       'game',
@@ -281,6 +328,10 @@ class FolderNamer {
       'review film',
       'episode',
       'sinopsis',
+      'watchlist',
+      'tv show',
+      'documentary',
+      'k-drama',
     ]),
     _Topic('Home & DIY', '🏡', [
       'diy',
@@ -294,6 +345,12 @@ class FolderNamer {
       'garden',
       'tanaman',
       'room tour',
+      'kitchen',
+      'bedroom',
+      'cleaning',
+      'storage',
+      'home decor',
+      'houseplant',
     ], [
       'inspo',
       'home'
@@ -311,6 +368,11 @@ class FolderNamer {
       'business',
       'passive income',
       'reksadana',
+      'saving',
+      'investing',
+      'stock',
+      'side hustle',
+      'personal finance',
     ]),
     _Topic('Learning', '📚', [
       'tutorial',
@@ -325,6 +387,8 @@ class FolderNamer {
       'lesson',
       'edukasi',
       'productivity',
+      'skill',
+      'study tips',
     ]),
     _Topic('Pets', '🐱', [
       'cat',
@@ -336,6 +400,34 @@ class FolderNamer {
       'pet',
       'hewan',
       'anabul',
+    ]),
+    _Topic('Books', '📖', [
+      'book',
+      'books',
+      'reading',
+      'novel',
+      'booktok',
+      'bookstagram',
+      'buku',
+      'kindle',
+      'reading list',
+      'book review',
+    ], [
+      'read',
+      'buku'
+    ]),
+    _Topic('Gift Ideas', '🎁', [
+      'gift',
+      'gift idea',
+      'kado',
+      'hadiah',
+      'birthday gift',
+      'anniversary gift',
+      'wishlist',
+    ], [
+      'gift',
+      'kado',
+      'wishlist'
     ]),
     _Topic('Funny', '😂', [
       'funny',
@@ -377,7 +469,9 @@ class FolderNamer {
   /// keyed by folder id. Never returns a name that already exists.
   FolderProposal propose(String text, Map<String, String> existingNames) {
     final lower = ' ${text.toLowerCase()} ';
-    final tokens = lower.split(RegExp(r'[^a-z0-9\-]+')).toSet();
+    // Each word plus its English singular, so "gyms" or "trips" still hit "gym" and "trip".
+    final words = lower.split(RegExp(r'[^a-z0-9\-]+'));
+    final tokens = {...words, ...words.map(KeywordCategorizer.singular)};
 
     _Topic? best;
     var bestScore = 0;

@@ -2,6 +2,7 @@
 const express = require('express');
 const { pool } = require('./db');
 const { ah, HttpError, isUuid } = require('./util');
+const { tombstoneDays } = require('./maintenance');
 
 /** A permanent problem with one op (bad data, no permission). The client drops it. */
 class Rejection extends Error {}
@@ -174,54 +175,65 @@ syncRouter.post('/push', ah(async (req, res) => {
  * Returns everything the caller can see that changed after `since`.
  * The cursor overlaps by a few seconds so writes committing mid-request are never skipped;
  * the client's upserts are idempotent, so duplicates are harmless.
+ *
+ * A device whose cursor is older than the tombstone horizon may have missed deletes that were
+ * since purged, so it gets everything with `full: true`, and drops local (already synced)
+ * records that are no longer in the answer.
  */
 syncRouter.get('/pull', ah(async (req, res) => {
-  const since = req.query.since ? new Date(String(req.query.since)) : new Date(0);
+  let since = req.query.since ? new Date(String(req.query.since)) : new Date(0);
   if (Number.isNaN(since.getTime())) throw new HttpError(400, 'since must be an ISO-8601 timestamp');
+  const horizon = Date.now() - tombstoneDays() * 86400_000;
+  const full = Boolean(req.query.since) && since.getTime() < horizon;
+  if (full) since = new Date(0);
   const me = req.user.id;
 
-  const { rows: [{ cursor }] } = await pool.query(`SELECT now() - interval '5 seconds' AS cursor`);
-
-  const folders = await pool.query(
-    `SELECT f.id, f.owner_id, f.name, f.color, f.emoji, f.is_shared,
-            f.created_at, f.updated_at, f.deleted_at, fm.role AS my_role
-     FROM folders f
-     JOIN folder_members fm ON fm.folder_id = f.id AND fm.user_id = $1
-     WHERE f.server_updated_at > $2 OR fm.added_at > $2`,
-    [me, since]);
-
-  const items = await pool.query(
-    `SELECT i.id, i.folder_id, i.url, i.title, i.source, i.thumbnail_url, i.tag, i.status, i.author,
-            i.suggested_folder_id, i.confidence, i.created_at, i.updated_at, i.deleted_at,
-            i.owner_id AS added_by, u.display_name AS added_by_name,
-            i.completed_at, i.completed_by, cu.display_name AS completed_by_name, i.completion_updated_at
-     FROM items i
-     JOIN users u ON u.id = i.owner_id
-     LEFT JOIN users cu ON cu.id = i.completed_by
-     LEFT JOIN folder_members fm ON fm.folder_id = i.folder_id AND fm.user_id = $1
-     WHERE (fm.user_id IS NOT NULL OR (i.folder_id IS NULL AND i.owner_id = $1))
-       AND (i.server_updated_at > $2 OR fm.added_at > $2)`,
-    [me, since]);
-
-  // Member lists are small, so send them in full for every shared board the caller is in.
-  const members = await pool.query(
-    `SELECT fm.folder_id, fm.user_id, fm.role, u.display_name
-     FROM folder_members fm
-     JOIN users u ON u.id = fm.user_id
-     JOIN folders f ON f.id = fm.folder_id AND f.is_shared AND f.deleted_at IS NULL
-     WHERE fm.folder_id IN (SELECT folder_id FROM folder_members WHERE user_id = $1)
-     ORDER BY fm.added_at`,
-    [me]);
-
-  // Lets the client drop boards it was removed from.
-  const accessible = await pool.query(
-    `SELECT fm.folder_id FROM folder_members fm
-     JOIN folders f ON f.id = fm.folder_id AND f.deleted_at IS NULL
-     WHERE fm.user_id = $1`,
-    [me]);
+  // Independent reads run side by side: the database is a network hop away.
+  const [cursorRes, folders, items, members, accessible] = await Promise.all([
+    pool.query(`SELECT now() - interval '5 seconds' AS cursor`),
+    pool.query(
+      `SELECT f.id, f.owner_id, f.name, f.color, f.emoji, f.is_shared,
+              f.created_at, f.updated_at, f.deleted_at, fm.role AS my_role
+       FROM folders f
+       JOIN folder_members fm ON fm.folder_id = f.id AND fm.user_id = $1
+       WHERE f.server_updated_at > $2 OR fm.added_at > $2`,
+      [me, since]),
+    pool.query(
+      `SELECT i.id, i.folder_id, i.url, i.title, i.source, i.thumbnail_url, i.tag, i.status, i.author,
+              i.suggested_folder_id, i.confidence, i.created_at, i.updated_at, i.deleted_at,
+              i.owner_id AS added_by, u.display_name AS added_by_name,
+              i.completed_at, i.completed_by, cu.display_name AS completed_by_name, i.completion_updated_at
+       FROM (
+         SELECT i.* FROM items i
+         JOIN folder_members fm ON fm.folder_id = i.folder_id AND fm.user_id = $1
+         WHERE i.server_updated_at > $2 OR fm.added_at > $2
+         UNION ALL
+         SELECT i.* FROM items i
+         WHERE i.folder_id IS NULL AND i.owner_id = $1 AND i.server_updated_at > $2
+       ) i
+       JOIN users u ON u.id = i.owner_id
+       LEFT JOIN users cu ON cu.id = i.completed_by`,
+      [me, since]),
+    // Member lists are small, so send them in full for every shared board the caller is in.
+    pool.query(
+      `SELECT fm.folder_id, fm.user_id, fm.role, u.display_name
+       FROM folder_members fm
+       JOIN users u ON u.id = fm.user_id
+       JOIN folders f ON f.id = fm.folder_id AND f.is_shared AND f.deleted_at IS NULL
+       WHERE fm.folder_id IN (SELECT folder_id FROM folder_members WHERE user_id = $1)
+       ORDER BY fm.added_at`,
+      [me]),
+    // Lets the client drop boards it was removed from.
+    pool.query(
+      `SELECT fm.folder_id FROM folder_members fm
+       JOIN folders f ON f.id = fm.folder_id AND f.deleted_at IS NULL
+       WHERE fm.user_id = $1`,
+      [me]),
+  ]);
 
   res.json({
-    cursor: cursor.toISOString(),
+    cursor: cursorRes.rows[0].cursor.toISOString(),
+    full,
     folders: folders.rows,
     items: items.rows,
     members: members.rows,

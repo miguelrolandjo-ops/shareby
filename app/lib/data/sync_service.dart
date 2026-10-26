@@ -79,6 +79,8 @@ class SyncService {
       items: list('items').map(Item.fromApi).toList(),
       members: list('members').map(Member.fromApi).toList(),
       accessibleFolderIds: ((res['accessible_folder_ids'] as List?) ?? const []).whereType<String>().toSet(),
+      // This phone was away longer than the server keeps deletes: it sent everything instead.
+      full: res['full'] == true,
     );
     final cursor = res['cursor'];
     if (cursor is String) await sessions.setPullCursor(cursor);

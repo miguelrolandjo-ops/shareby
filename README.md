@@ -6,9 +6,13 @@ with friends. Mobile first (Android, then iOS), plus a web app.
 ```
 app/                Flutter app (Android + iOS)
 web/                Web app (React + Vite, installable PWA), served by Nginx
-server/             Sync + sharing API (Node.js, Express, PostgreSQL)
-docker-compose.yml  The whole stack: PostgreSQL + API + web
+server/             Sync + sharing API (Node.js, Express, PostgreSQL / Supabase)
+deploy/             Production: Docker Compose for your Ubuntu server, HTTPS, backups
+docker-compose.yml  Local development stack: PostgreSQL + API + web
 ```
+
+**Production:** the database is Supabase (free tier), the API and web app run on your own
+Ubuntu server, sign-in is Google. Step-by-step: [deploy/DEPLOY.md](deploy/DEPLOY.md).
 
 Phone and web speak the same sync protocol to the same API, so signing in with the same
 account shows the same folders, boards and done ticks everywhere.
@@ -62,10 +66,12 @@ cp .env.example .env
 npm install
 npm run migrate               # creates tables (safe to re-run)
 npm start                     # http://localhost:8080
-npm test                      # 16 end-to-end tests against the database
+npm test                      # 28 tests (25 end-to-end against the database)
 ```
 
 `ALLOW_DEV_AUTH=true` lets the app sign in with any email. **Turn it off in production.**
+Without `GOOGLE_CLIENT_ID` the apps show the test-email sign-in when the server allows it;
+with it, they use Google. `GET /auth/config` tells the apps which one to show.
 
 ## 2. Run the app (Android)
 
@@ -156,20 +162,27 @@ cd web && npm i -D playwright && npx playwright install chromium
 BASE_URL=http://localhost:8000 node e2e/smoke.cjs
 ```
 
-## Going to production sign-in
+## Online services
 
-`lib/data/auth_service.dart` is the only file to change.
-
-- **Google:** add `google_sign_in`, create OAuth clients (Android needs your SHA-1),
-  get the ID token and call `api.googleLogin(idToken)`. On the web, use Google Identity
-  Services for the ID token and call it from `signIn` in `web/src/state/store.ts`.
-  Set `GOOGLE_CLIENT_ID` on the server to all your client IDs, comma-separated.
-- **Apple:** add `sign_in_with_apple`, get the identity token and call
-  `api.appleLogin(token, displayName: ...)` (Apple only sends the name on first sign-in).
-  Set `APPLE_CLIENT_ID` on the server.
-- Move the session token from `shared_preferences` to `flutter_secure_storage`, and on the
-  web from `localStorage` to an httpOnly cookie set by the API.
-- Serve the API over HTTPS and set `ALLOW_DEV_AUTH=false`.
+- **Database: Supabase.** Tables live in a private `shareby` schema (Row Level Security on, no
+  grants to Supabase's public API roles), reached through the session pooler with SSL.
+  Kept lean for the free tier: no session table (sign-in tokens are HMAC-signed), accepted
+  invitations are deleted, deleted links and folders are purged after 60 days by a daily job,
+  and pictures stay on devices (only the short image address syncs, so friends' phones can
+  download the same picture without scraping Instagram again). A device away longer than 60
+  days gets a full resync (`full: true` from `/sync/pull`) so it can't keep purged items.
+- **Google sign-in.** Android: `google_sign_in` (Credential Manager) returns an ID token for
+  the server's Web client ID; the API verifies it. Web: Google Identity Services button, loaded
+  only on the sign-in sheet. The session token is kept in Android Keystore / iOS Keychain
+  (`flutter_secure_storage`). Set up in [deploy/DEPLOY.md](deploy/DEPLOY.md#2-google-sign-in-google-cloud-console).
+- **Account deletion** (required by Google Play): Profile → *Delete account*, phone and web
+  (`DELETE /account`). Personal saves stay on the device, like signing out.
+- **Languages.** The interface is in English (pinned, so system labels stay English on phones
+  set to another language). Auto-sorting and folder suggestions understand English and
+  Indonesian titles: English plurals match either way ("Recipes" folder ↔ "pasta recipe",
+  "gyms" ↔ "gym"), the web app knows common English folder names (Recipes, Workouts, Books,
+  Gifts...), and "Sort it for me" can propose English topics such as Books and Gift Ideas.
+  Link previews ask sites for English first, then Indonesian.
 
 ## iOS (phase 2)
 
@@ -183,6 +196,10 @@ The app itself runs on iOS today. Share-to-save needs a native **Share Extension
    `drainPending`, returning and clearing that array. No Dart changes are needed.
 4. For the local dev server, add `NSAppTransportSecurity > NSAllowsLocalNetworking = YES`
    to `ios/Runner/Info.plist`.
+5. Sign-in on iOS: add the iOS OAuth client ID to `GOOGLE_CLIENT_ID` (after the web one) and
+   to `Info.plist` (`GIDClientID` + its reversed URL scheme). The App Store requires *Sign in
+   with Apple* next to Google: add `sign_in_with_apple`, call `api.appleLogin(...)` (the
+   server's `/auth/apple` is ready), and set `APPLE_CLIENT_ID` to the bundle ID.
 
 ## Where things are
 
@@ -197,7 +214,10 @@ The app itself runs on iOS today. Share-to-save needs a native **Share Extension
 | Web: IndexedDB + outbox | `web/src/data/localDb.ts` |
 | Web: edits, sync, state | `web/src/data/repository.ts`, `sync.ts`, `web/src/state/store.ts` |
 | Web: Nginx | `web/nginx/default.conf.template`, `security-headers.conf` |
-| API | `server/src/sync.js`, `auth.js`, `folders.js`, `preview.js` |
+| API | `server/src/sync.js`, `auth.js`, `tokens.js`, `folders.js`, `maintenance.js`, `preview.js` |
+| Sign-in (phone) | `app/lib/data/auth_service.dart`, `session_store.dart` |
+| Sign-in (web) | `web/src/data/googleIdentity.ts`, `web/src/ui/sheets/SignInSheet.tsx` |
+| Production | `deploy/docker-compose.yml`, `deploy/DEPLOY.md` |
 | Schema | `server/schema.sql` |
 
 ## Notes

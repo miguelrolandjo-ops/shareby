@@ -18,7 +18,7 @@ type Json = Record<string, unknown>;
 export class ApiClient {
   constructor(private readonly base: string, private readonly token: () => string | null) {}
 
-  private async send(method: 'GET' | 'POST', path: string, body?: Json): Promise<Json> {
+  private async send(method: 'GET' | 'POST' | 'DELETE', path: string, body?: Json): Promise<Json> {
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     const token = this.token();
     if (token) headers.authorization = `Bearer ${token}`;
@@ -48,11 +48,19 @@ export class ApiClient {
     throw new ApiError(res.status, typeof data.error === 'string' ? data.error : `Request failed (${res.status})`);
   }
 
+  /** Which sign-in methods the server offers (public). */
+  authConfig() {
+    return this.send('GET', '/auth/config');
+  }
   devLogin(email: string, displayName: string, provider: string) {
     return this.send('POST', '/auth/dev', { email, display_name: displayName, provider });
   }
   googleLogin(idToken: string) {
     return this.send('POST', '/auth/google', { id_token: idToken });
+  }
+  /** Permanently deletes the signed-in account and everything it stored on the server. */
+  deleteAccount() {
+    return this.send('DELETE', '/account');
   }
   push(ops: Json[]) {
     return this.send('POST', '/sync/push', { ops });

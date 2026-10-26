@@ -153,4 +153,36 @@ void main() {
       expect(categorizer.suggest(post, [a, b]).folderId, isNull);
     });
   });
+
+  group('English', () {
+    const english = [
+      CategoryCandidate(id: 'recipes', name: 'Recipes'),
+      CategoryCandidate(id: 'cafes', name: 'Cafes'),
+      CategoryCandidate(id: 'gifts', name: 'Gift Ideas'),
+      CategoryCandidate(id: 'shoes', name: 'Running Shoes'),
+    ];
+
+    test('a plural folder name matches a singular word in the title', () {
+      expect(categorizer.suggest('Easy one-pan pasta recipe', english).folderId, 'recipes');
+      expect(categorizer.suggest('A tiny cafe hidden in Kemang', english).folderId, 'cafes');
+    });
+
+    test('a singular folder name matches a plural word in the title', () {
+      expect(categorizer.suggest('Gift for my sister under 100k', english).folderId, 'gifts');
+    });
+
+    test('-ies and -es plurals are matched too', () {
+      const folders = [CategoryCandidate(id: 'puppy', name: 'Puppy'), CategoryCandidate(id: 'box', name: 'Boxes')];
+      expect(categorizer.suggest('Training tips for puppies', folders).folderId, 'puppy');
+      expect(categorizer.suggest('Cute storage box from IKEA', folders).folderId, 'box');
+    });
+
+    test('Indonesian words ending in -us / -is are left alone', () {
+      expect(KeywordCategorizer.singular('bagus'), 'bagus');
+      expect(KeywordCategorizer.singular('manis'), 'manis');
+      expect(KeywordCategorizer.singular('glass'), 'glass');
+      expect(KeywordCategorizer.singular('recipes'), 'recipe');
+      expect(KeywordCategorizer.singular('berries'), 'berry');
+    });
+  });
 }

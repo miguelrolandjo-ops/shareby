@@ -25,3 +25,30 @@ describe('categorizer (same results as the phone app)', () => {
     expect(suggest('Dessert box viral', folders).folderId).toBeNull();
   });
 });
+
+describe('categorizer in English', () => {
+  const english = [
+    { id: 'recipes', name: 'Recipes', examples: [] },
+    { id: 'cafes', name: 'Cafes', examples: [] },
+    { id: 'gifts', name: 'Gift Ideas', examples: [] },
+    { id: 'gym', name: 'Workouts', examples: [] },
+    { id: 'books', name: 'Books to read', examples: [] },
+  ];
+  it('matches plural folder names to singular words and back', () => {
+    expect(suggest('Easy one-pan pasta recipe', english).folderId).toBe('recipes');
+    expect(suggest('Tiny cafe hidden in Kemang', english).folderId).toBe('cafes');
+    expect(suggest('Birthday gift for my sister', english).folderId).toBe('gifts');
+  });
+  it('knows common English words for English-named folders', () => {
+    expect(suggest('Chicken soup for dinner, ready in 20 minutes', english).folderId).toBe('recipes');
+    expect(suggest('10 minute abs and cardio routine', english).folderId).toBe('gym');
+    expect(suggest('Novels everyone on BookTok is reading', english).folderId).toBe('books');
+  });
+  it('still leaves unrelated English text uncategorized', () => {
+    expect(suggest('Funny moment at the airport', english).folderId).toBeNull();
+  });
+  it('mixes with Indonesian folders', () => {
+    const mixed = [...english, { id: 'resep', name: 'Resep', examples: [] }];
+    expect(suggest('Resep ayam goreng', mixed).folderId).toBe('resep');
+  });
+});

@@ -1,0 +1,74 @@
+# Production on your Ubuntu server. The database is Supabase, so there is no Postgres here.
+#
+#   cp .env.example .env            # fill it in (see DEPLOY.md)
+#   docker compose --profile caddy  up -d --build    # server with a public IP + domain
+#   docker compose --profile tunnel up -d --build    # home server / no public IP (Cloudflare Tunnel)
+#
+# Nginx (web) serves the web app and proxies /api to the API, so the phone app, the web app and
+# Google sign-in all use ONE https origin, e.g. https://shareby.example.com and .../api.
+name: shareby
+
+services:
+  api:
+    build: ../server
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging: &logs
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  web:
+    build: ../web
+    environment:
+      API_UPSTREAM: http://api:8080
+    ports:
+      - "127.0.0.1:8000:80"        # local only; the public entry is Caddy or the tunnel
+    depends_on:
+      - api
+    restart: unless-stopped
+    logging: *logs
+
+  # Option A: public IP + domain. Caddy gets and renews the HTTPS certificate by itself.
+  caddy:
+    image: caddy:2
+    profiles: ["caddy"]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SHAREBY_DOMAIN: ${SHAREBY_DOMAIN:?set SHAREBY_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+    restart: unless-stopped
+    logging: *logs
+
+  # Option B: no public IP / behind CGNAT (common on home internet). Cloudflare gives HTTPS;
+  # no ports are opened on the router.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env}
+    depends_on:
+      - web
+    restart: unless-stopped
+    logging: *logs
+
+volumes:
+  caddy_data:
+  caddy_config:

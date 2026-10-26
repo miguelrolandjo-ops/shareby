@@ -13,11 +13,13 @@ dependencies:
   sqflite: ^2.4.1            # on-device database: the offline source of truth
   path: ^1.9.0
   shared_preferences: ^2.3.3 # small flags: session, sync cursor, first-run seed
-  http: ^1.2.2               # REST calls to the Shareby API (-> PostgreSQL)
+  http: ^1.2.2               # REST calls to the Shareby API (-> Supabase PostgreSQL)
   uuid: ^4.5.1               # IDs are created on the device so saves work offline
   url_launcher: ^6.3.1       # open a saved link
   path_provider: ^2.1.5      # where the saved thumbnails live
   image: ^4.5.4              # shrinks a link's picture to a small JPEG kept on the device
+  google_sign_in: ^7.2.0     # "Continue with Google": ID token for the API (Credential Manager on Android)
+  flutter_secure_storage: ^10.0.0  # the session token, in Android Keystore / iOS Keychain
 
 dev_dependencies:
   flutter_test:

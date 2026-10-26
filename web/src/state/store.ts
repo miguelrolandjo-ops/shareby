@@ -6,6 +6,11 @@ import { Repository } from '../data/repository';
 import { SessionStore } from '../data/session';
 import { SyncService } from '../data/sync';
 
+export interface AuthConfig {
+  googleClientId: string | null;
+  dev: boolean;
+}
+
 export type SyncState = 'localOnly' | 'syncing' | 'synced' | 'offline' | 'error';
 
 export interface Toast {
@@ -191,17 +196,40 @@ export class AppStore {
     return res.status === 'added' ? 'added' : 'pending';
   };
 
-  /**
-   * Development sign-in (any email). For production, get a Google ID token from
-   * Google Identity Services and call api.googleLogin(token) here instead.
-   */
-  signIn = async (provider: 'google' | 'apple', email: string, displayName: string): Promise<void> => {
-    const body = await this.api.devLogin(email, displayName, provider);
+  /** Which sign-in methods the server offers; null while unknown (e.g. offline). */
+  authConfig = async (): Promise<AuthConfig | null> => {
+    try {
+      const c = await this.api.authConfig();
+      return {
+        googleClientId: typeof c.google_client_id === 'string' && c.google_client_id ? c.google_client_id : null,
+        dev: c.dev === true,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  /** Google: the ID token comes from Google Identity Services (see SignInSheet). */
+  signInWithGoogle = (idToken: string) => this.finishSignIn(this.api.googleLogin(idToken), 'google');
+
+  /** Development servers only (ALLOW_DEV_AUTH=true): any email works. */
+  signInDev = (provider: 'google' | 'apple', email: string, displayName: string) =>
+    this.finishSignIn(this.api.devLogin(email, displayName, provider), provider);
+
+  private async finishSignIn(login: Promise<Record<string, unknown>>, provider: 'google' | 'apple'): Promise<void> {
+    const body = await login;
     const user = body.user as Record<string, string>;
     this.sessions.save({ userId: user.id, email: user.email, displayName: user.display_name, provider, token: body.token as string });
     await this.repo.enqueueFullUpload(); // this browser's saves move to the cloud
     await this.reload();
     await this.syncNow();
+  }
+
+  /** Deletes the account on the server; this browser keeps its personal saves, like signing out. */
+  deleteAccount = async () => {
+    await this.api.deleteAccount();
+    await this.signOutLocally();
+    await this.reload();
   };
 
   signOut = async () => {

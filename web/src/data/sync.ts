@@ -71,6 +71,7 @@ export class SyncService {
       items: list(res.items).map(itemFromApi),
       members: list(res.members).map(memberFromApi),
       accessibleFolderIds: new Set(Array.isArray(res.accessible_folder_ids) ? res.accessible_folder_ids.filter((x): x is string => typeof x === 'string') : []),
+      full: res.full === true,
     });
     if (typeof res.cursor === 'string') this.sessions.setPullCursor(res.cursor);
   }

@@ -1,0 +1,8 @@
+# HTTPS in front of the Nginx container. Caddy fetches and renews the certificate itself;
+# the domain's DNS A record must point at this server and ports 80/443 must be open.
+{$SHAREBY_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:80 {
+		header_up X-Forwarded-Proto https
+	}
+}

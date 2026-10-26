@@ -2,7 +2,6 @@ import { CircleCheck } from 'lucide-react';
 import { config } from '../../config';
 import { useApp } from '../../state/context';
 import { folderOf, newItems } from '../../state/selectors';
-import { Note } from '../components/bits';
 import { LinkRow } from '../components/LinkViews';
 import { useSheets } from '../components/Sheet';
 import { ConfirmItemSheet } from '../sheets/ConfirmItemSheet';

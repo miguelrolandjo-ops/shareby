@@ -1,4 +1,6 @@
-import { ArrowLeft, LogOut, RefreshCw } from 'lucide-react';
+import { ArrowLeft, LogOut, RefreshCw, Trash2 } from 'lucide-react';
+import { forgetGoogleAccount } from '../../data/googleIdentity';
+import { friendlyError } from '../errors';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useApp, useStore } from '../../state/context';
@@ -16,6 +18,8 @@ export function ProfileScreen() {
   const store = useStore();
   const navigate = useNavigate();
   const [confirmOut, setConfirmOut] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const user = snap.session;
   const boards = sharedFolders(snap).length;
 
@@ -64,11 +68,32 @@ export function ProfileScreen() {
             </p>
             <div className="row">
               <button className="btn" onClick={() => setConfirmOut(false)}>Cancel</button>
-              <button className="btn" style={{ color: 'var(--danger)' }} onClick={() => { void store.signOut(); setConfirmOut(false); }}>Sign out</button>
+              <button className="btn" style={{ color: 'var(--danger)' }} onClick={() => { forgetGoogleAccount(); void store.signOut(); setConfirmOut(false); }}>Sign out</button>
+            </div>
+          </div>
+        ) : confirmDelete ? (
+          <div className="card">
+            <p style={{ marginBottom: 12 }}>
+              Delete your Shareby account? Your backup, the boards you own and the pins you added to friends' boards
+              are deleted from the server for good. Personal saves already in this browser stay here.
+            </p>
+            {deleteError && <p className="error" role="alert" style={{ marginBottom: 10 }}>{deleteError}</p>}
+            <div className="row">
+              <button className="btn" onClick={() => { setConfirmDelete(false); setDeleteError(null); }}>Cancel</button>
+              <button className="btn" style={{ color: 'var(--danger)' }}
+                onClick={() => {
+                  setDeleteError(null);
+                  store.deleteAccount()
+                    .then(() => { forgetGoogleAccount(); setConfirmDelete(false); store.showToast('Your account was deleted.'); })
+                    .catch((e) => setDeleteError(friendlyError(e)));
+                }}>Delete account</button>
             </div>
           </div>
         ) : (
-          <button className="btn danger" onClick={() => setConfirmOut(true)}><LogOut size={18} aria-hidden /> Sign out</button>
+          <div style={{ display: 'grid', gap: 6, justifyItems: 'start' }}>
+            <button className="btn danger" onClick={() => setConfirmOut(true)}><LogOut size={18} aria-hidden /> Sign out</button>
+            <button className="btn danger small" onClick={() => setConfirmDelete(true)}><Trash2 size={16} aria-hidden /> Delete account</button>
+          </div>
         )}
       </div>
     </div>

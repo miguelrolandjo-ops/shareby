@@ -21,7 +21,7 @@ Future<void> main() async {
 
   // Local first: the database and session load from the device, no network needed.
   final db = await LocalDb.open();
-  final sessions = SessionStore(await SharedPreferences.getInstance());
+  final sessions = await SessionStore.open(await SharedPreferences.getInstance());
   final api = ApiClient(baseUrl: AppConfig.apiBaseUrl, tokenProvider: () => sessions.current?.token);
 
   // Platform + title rules: the copy shipped in the app, then the newest one fetched earlier.

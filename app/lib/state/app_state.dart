@@ -402,12 +402,33 @@ class AppState extends ChangeNotifier {
     return (res['status'] as String?) ?? 'pending';
   }
 
+  /// What the server offers for sign-in. Needs a connection.
+  Future<AuthOptions> signInOptions() => auth.options();
+
   /// Sign-in moves this device's saves to the cloud and unlocks shared boards.
-  Future<void> signIn({required String provider, required String email, required String displayName}) async {
-    await auth.signIn(provider: provider, email: email, displayName: displayName);
+  Future<void> signInWithGoogle(AuthOptions options) async {
+    await auth.signInWithGoogle(options);
+    await _afterSignIn();
+  }
+
+  /// Development servers only (ALLOW_DEV_AUTH=true): any email works.
+  Future<void> signInDev({required String provider, required String email, required String displayName}) async {
+    await auth.signInDev(provider: provider, email: email, displayName: displayName);
+    await _afterSignIn();
+  }
+
+  Future<void> _afterSignIn() async {
     await repo.enqueueFullUpload();
     await reload();
     await syncNow();
+  }
+
+  /// Deletes the account on the server (Play Store requirement). Like signing out, personal
+  /// saves stay on this phone and shared boards leave it.
+  Future<void> deleteAccount() async {
+    await auth.deleteAccount();
+    await _signOutLocally();
+    await reload();
   }
 
   /// Personal saves stay on the device; shared boards and the sync queue are cleared.

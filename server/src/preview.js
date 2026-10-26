@@ -53,7 +53,11 @@ previewRouter.get('/', ah(async (req, res) => {
     const response = await fetch(target, {
       redirect: 'follow',
       signal: AbortSignal.timeout(6000),
-      headers: { 'user-agent': 'Mozilla/5.0 (compatible; SharebyPreview/0.1)', accept: 'text/html' },
+      headers: {
+        'user-agent': 'Mozilla/5.0 (compatible; SharebyPreview/0.1)',
+        accept: 'text/html',
+        'accept-language': 'en,id;q=0.8', // English titles first, like the apps
+      },
     });
     html = (await response.text()).slice(0, 600_000);
   } catch {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/theme.dart';
+import '../../data/auth_service.dart';
 import '../../data/models.dart';
 import '../../state/app_state.dart';
 import '../helpers.dart';
@@ -23,27 +24,52 @@ class FriendsScreen extends StatelessWidget {
 }
 
 /// Starts sign-in from anywhere (Friends tab, Profile).
-Future<void> startSignIn(BuildContext context, String provider) async {
-  final details = await showDialog<(String, String)>(
-    context: context,
-    builder: (_) => _DevSignInDialog(provider: provider),
-  );
-  if (details == null || !context.mounted) return;
-
+///
+/// Asks the server which methods it offers, then opens Google's account picker. A development
+/// server (ALLOW_DEV_AUTH=true) without Google set up gets the "any email" dialog instead.
+Future<void> startSignIn(BuildContext context) async {
   final state = context.read<AppState>();
   final messenger = ScaffoldMessenger.of(context);
+  final navigator = Navigator.of(context, rootNavigator: true);
+  var spinnerUp = true;
   showDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (_) => const Center(child: CircularProgressIndicator()),
   );
+  void hideSpinner() {
+    if (spinnerUp) {
+      spinnerUp = false;
+      navigator.pop();
+    }
+  }
+
   try {
-    await state.signIn(provider: provider, email: details.$1, displayName: details.$2);
+    final options = await state.signInOptions();
+    if (options.google) {
+      await state.signInWithGoogle(options);
+    } else if (options.dev) {
+      hideSpinner();
+      if (!context.mounted) return;
+      final details = await showDialog<(String, String)>(context: context, builder: (_) => const _DevSignInDialog());
+      if (details == null || !context.mounted) return;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
+      );
+      spinnerUp = true;
+      await state.signInDev(provider: 'google', email: details.$1, displayName: details.$2);
+    } else {
+      throw StateError("Sign-in isn't set up on the server yet.");
+    }
     messenger.showSnackBar(const SnackBar(content: Text('Signed in. Your saves are backing up and sharing is on.')));
+  } on SignInCancelled {
+    // The user closed Google's picker.
   } catch (e) {
     messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
   } finally {
-    if (context.mounted) Navigator.of(context, rootNavigator: true).pop();
+    hideSpinner();
   }
 }
 
@@ -72,16 +98,9 @@ class _Locked extends StatelessWidget {
         ),
         const SizedBox(height: 28),
         OutlinedButton.icon(
-          onPressed: () => startSignIn(context, 'google'),
+          onPressed: () => startSignIn(context),
           icon: const Text('G', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: Color(0xFF4285F4))),
           label: const Text('Continue with Google'),
-        ),
-        const SizedBox(height: 10),
-        FilledButton.icon(
-          style: FilledButton.styleFrom(backgroundColor: Colors.black),
-          onPressed: () => startSignIn(context, 'apple'),
-          icon: const Icon(Icons.apple, size: 22),
-          label: const Text('Continue with Apple'),
         ),
         const SizedBox(height: 22),
         const InfoNote(
@@ -93,10 +112,9 @@ class _Locked extends StatelessWidget {
   }
 }
 
-/// Development stand-in for the Google / Apple account picker (see AuthService).
+/// Development servers only: sign in as any email (see AuthService).
 class _DevSignInDialog extends StatefulWidget {
-  const _DevSignInDialog({required this.provider});
-  final String provider;
+  const _DevSignInDialog();
 
   @override
   State<_DevSignInDialog> createState() => _DevSignInDialogState();
@@ -115,13 +133,12 @@ class _DevSignInDialogState extends State<_DevSignInDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final label = widget.provider == 'apple' ? 'Apple' : 'Google';
     final valid = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(_email.text.trim());
     return AlertDialog(
-      title: Text('Continue with $label'),
+      title: const Text('Sign in (development)'),
       content: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('Development build: enter any email to act as that $label account.',
-            style: const TextStyle(color: AppColors.inkSoft, fontSize: 13)),
+        const Text('This server allows test sign-ins: enter any email to act as that account.',
+            style: TextStyle(color: AppColors.inkSoft, fontSize: 13)),
         const SizedBox(height: 14),
         TextField(
           controller: _email,

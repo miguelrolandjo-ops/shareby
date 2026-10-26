@@ -287,6 +287,7 @@ class LocalDb {
     required List<Item> items,
     required List<Member> members,
     required Set<String> accessibleFolderIds,
+    bool full = false,
   }) async {
     await _db.transaction((txn) async {
       Future<bool> dirty(String table, String id) async {
@@ -329,6 +330,21 @@ class LocalDb {
                 )
                 .toDb(dirty: false),
             conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+
+      // A full resync lists everything this account has: synced records missing from it were
+      // deleted elsewhere long ago. Unpushed local edits (dirty) always stay.
+      if (full) {
+        final keepItems = items.map((i) => i.id).toSet();
+        final keepFolders = folders.map((f) => f.id).toSet();
+        for (final row in await txn.query('items', columns: ['id'], where: 'dirty = 0')) {
+          final id = row['id'] as String;
+          if (!keepItems.contains(id)) await txn.delete('items', where: 'id = ?', whereArgs: [id]);
+        }
+        for (final row in await txn.query('folders', columns: ['id'], where: 'dirty = 0')) {
+          final id = row['id'] as String;
+          if (!keepFolders.contains(id)) await txn.delete('folders', where: 'id = ?', whereArgs: [id]);
+        }
       }
 
       // Boards we were removed from (or that were deleted) disappear from this device.

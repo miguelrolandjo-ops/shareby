@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/theme.dart';
 import '../../state/app_state.dart';
+import '../helpers.dart';
 import '../widgets/common.dart';
 import 'friends_screen.dart';
 
@@ -37,6 +38,36 @@ class ProfileScreen extends StatelessWidget {
       ),
     );
     if (ok == true) await state.signOut();
+  }
+
+  /// Google Play requires in-app account deletion for apps with sign-in.
+  Future<void> _confirmDeleteAccount(BuildContext context, AppState state) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete your account?'),
+        content: const Text(
+          'Your backup, the boards you own and the pins you added to friends\' boards are deleted from '
+          'the server for good. Personal saves already on this phone stay here.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFFC0392B)),
+            child: const Text('Delete account'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await state.deleteAccount();
+      messenger.showSnackBar(const SnackBar(content: Text('Your account was deleted.')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    }
   }
 
   @override
@@ -106,19 +137,19 @@ class ProfileScreen extends StatelessWidget {
               style: TextStyle(color: AppColors.inkSoft, height: 1.4),
             ),
             const SizedBox(height: 12),
-            OutlinedButton(onPressed: () => startSignIn(context, 'google'), child: const Text('Continue with Google')),
-            const SizedBox(height: 10),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: Colors.black),
-              onPressed: () => startSignIn(context, 'apple'),
-              child: const Text('Continue with Apple'),
-            ),
-          ] else
+            OutlinedButton(onPressed: () => startSignIn(context), child: const Text('Continue with Google')),
+          ] else ...[
             TextButton(
               onPressed: () => _confirmSignOut(context, state),
               style: TextButton.styleFrom(foregroundColor: const Color(0xFFC0392B)),
               child: const Text('Sign out'),
             ),
+            TextButton(
+              onPressed: () => _confirmDeleteAccount(context, state),
+              style: TextButton.styleFrom(foregroundColor: AppColors.inkSoft),
+              child: const Text('Delete account'),
+            ),
+          ],
         ],
       ),
     );

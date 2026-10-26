@@ -139,6 +139,8 @@ export class LocalDb {
     items: Item[];
     members: Member[];
     accessibleFolderIds: Set<string>;
+    /** The server sent everything (this browser was away too long): drop synced records it no longer has. */
+    full?: boolean;
   }): Promise<void> {
     const tx = this.db.transaction(['folders', 'items', 'members'], 'readwrite');
     const folders = tx.objectStore('folders');
@@ -154,6 +156,13 @@ export class LocalDb {
       const local = await items.get(i.id);
       if (local?.dirty) continue;
       await items.put({ ...i, viewCount: local?.viewCount ?? 0, dirty: 0 });
+    }
+
+    if (changes.full) {
+      const keepItems = new Set(changes.items.map((i) => i.id));
+      const keepFolders = new Set(changes.folders.map((f) => f.id));
+      for (const i of await items.getAll()) if (!i.dirty && !keepItems.has(i.id)) await items.delete(i.id);
+      for (const f of await folders.getAll()) if (!f.dirty && !keepFolders.has(f.id)) await folders.delete(f.id);
     }
 
     // Boards we were removed from (or that were deleted) disappear from this browser.

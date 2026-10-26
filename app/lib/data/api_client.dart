@@ -80,7 +80,16 @@ class ApiClient {
   Future<Map<String, dynamic>> _post(String path, Map<String, Object?> body) =>
       _send(() => _client.post(_uri(path), headers: _headers(), body: jsonEncode(body)));
 
+  Future<Map<String, dynamic>> _delete(String path) =>
+      _send(() => _client.delete(_uri(path), headers: _headers()));
+
   // ------------------------------------------------------------ endpoints
+
+  /// Which sign-in methods the server offers. Public, no sign-in needed.
+  Future<Map<String, dynamic>> authConfig() => _get('/auth/config');
+
+  /// Permanently deletes the signed-in account and what it stored on the server.
+  Future<Map<String, dynamic>> deleteAccount() => _delete('/account');
 
   Future<Map<String, dynamic>> devLogin({
     required String email,

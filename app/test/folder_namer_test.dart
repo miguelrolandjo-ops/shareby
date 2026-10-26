@@ -23,4 +23,21 @@ void main() {
   test('unknown topics fall back to a general folder', () {
     expect(namer.propose('Saved from instagram.com', {}).name, 'Inspo');
   });
+
+  group('English', () {
+    test('common English saves get a fitting folder', () {
+      expect(namer.propose('Creamy chicken pasta for dinner', {}).name, 'Recipes');
+      expect(namer.propose('Things to do on a weekend road trip', {}).name, 'Travel');
+      expect(namer.propose('My favorite novels this year #booktok', {}).name, 'Books');
+      expect(namer.propose('Birthday gift ideas for him', {}).name, 'Gift Ideas');
+    });
+
+    test('plural words still hit short keywords', () {
+      expect(namer.propose('Best gyms in Jakarta', {}).name, 'Fitness');
+    });
+
+    test('"how to" does not pull a recipe into Learning', () {
+      expect(namer.propose('How to make fried rice at home: easy recipe', {}).name, 'Recipes');
+    });
+  });
 }

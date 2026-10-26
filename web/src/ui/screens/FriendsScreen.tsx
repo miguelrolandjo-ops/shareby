@@ -1,4 +1,4 @@
-import { Apple, Lock, Plus, Users } from 'lucide-react';
+import { Lock, Plus, Users } from 'lucide-react';
 import { isDone, type Folder } from '../../data/models';
 import { useApp } from '../../state/context';
 import { itemsIn, membersOf, sharedFolders } from '../../state/selectors';
@@ -13,11 +13,8 @@ export function SignInButtons() {
   const sheets = useSheets();
   return (
     <div style={{ display: 'grid', gap: 10 }}>
-      <button className="btn block" onClick={() => sheets.open(<SignInSheet provider="google" />)}>
+      <button className="btn block" onClick={() => sheets.open(<SignInSheet />)}>
         <span aria-hidden style={{ color: '#4285F4', fontWeight: 800, fontSize: 18 }}>G</span> Continue with Google
-      </button>
-      <button className="btn dark block" onClick={() => sheets.open(<SignInSheet provider="apple" />)}>
-        <Apple size={19} aria-hidden /> Continue with Apple
       </button>
     </div>
   );

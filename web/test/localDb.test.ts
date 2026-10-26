@@ -65,4 +65,13 @@ describe('LocalDb outbox', () => {
     expect((await db.folders()).map((f) => f.id)).toEqual(['f1']);
     expect(await db.pendingCount()).toBe(0);
   });
+
+  it('a full resync drops synced records the server no longer has, but keeps unpushed ones', async () => {
+    const db = await open();
+    const base = { folders: [], members: [], accessibleFolderIds: new Set<string>() };
+    await db.applyServerChanges({ ...base, items: [item({ id: 'gone', folderId: null }), item({ id: 'kept', folderId: null })] });
+    await db.saveItem(item({ id: 'local', folderId: null }), 'op1'); // made offline, not pushed yet
+    await db.applyServerChanges({ ...base, items: [item({ id: 'kept', folderId: null })], full: true });
+    expect((await db.items()).map((i) => i.id).sort()).toEqual(['kept', 'local']);
+  });
 });

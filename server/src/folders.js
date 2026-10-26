@@ -37,9 +37,9 @@ foldersRouter.post('/:id/invites', ah(async (req, res) => {
   }
 
   await pool.query(
-    `INSERT INTO invitations (folder_id, email, role, invited_by) VALUES ($1, $2, $3, $4)
-     ON CONFLICT (folder_id, email) DO UPDATE SET role = EXCLUDED.role, accepted_at = NULL`,
-    [folderId, email, role, req.user.id]);
+    `INSERT INTO invitations (folder_id, email, role) VALUES ($1, $2, $3)
+     ON CONFLICT (folder_id, email) DO UPDATE SET role = EXCLUDED.role, created_at = now()`,
+    [folderId, email, role]);
   res.json({ status: 'pending' });
 }));
 

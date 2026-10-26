@@ -94,10 +94,23 @@ class KeywordCategorizer implements Categorizer {
           out.add(t.substring(i, i + 2));
         }
       } else if (t.length > 2) {
-        out.add(t);
+        out.add(singular(t));
       }
     }
     return out;
+  }
+
+  /// English plurals to their singular, so a "Recipes" folder matches "easy pasta recipe" and
+  /// "Cafes" matches "cafe". Deliberately light: only clear plural endings, and never words
+  /// ending in -ss, -us or -is ("glass", "bagus", "manis"), so Indonesian is untouched.
+  static String singular(String t) {
+    if (t.length < 4 || !RegExp(r'^[a-z]+$').hasMatch(t)) return t;
+    if (t.endsWith('ies') && t.length > 4) return '${t.substring(0, t.length - 3)}y';
+    if (RegExp(r'(?:ches|shes|xes|sses|zes)$').hasMatch(t)) return t.substring(0, t.length - 2);
+    if (t.endsWith('s') && !t.endsWith('ss') && !t.endsWith('us') && !t.endsWith('is')) {
+      return t.substring(0, t.length - 1);
+    }
+    return t;
   }
 
   @override
